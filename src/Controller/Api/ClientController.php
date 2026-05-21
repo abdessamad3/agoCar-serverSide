@@ -11,7 +11,7 @@ use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Annotation\Route;
 
 #[Route('/api/client', name: 'app_api_client_')]
-final class ClientController extends AbstractController
+class ClientController extends AbstractController
 {
     #[Route('', name: 'list', methods: ['GET'])]
     public function list(ClientRepository $repo): JsonResponse
@@ -60,7 +60,7 @@ final class ClientController extends AbstractController
         $client->setPermisConduite($data['permisConduite'] ?? null);
         $client->setNationalite($data['nationalite'] ?? null);
         $client->setTelephone($data['telephone'] ?? null);
-        $client->setCreeAu(new \DateTime());
+        $client->setCreeAu(new \DateTimeImmutable());
         $client->setCreePar($this->getUser());
 
         $em->persist($client);
@@ -80,7 +80,7 @@ final class ClientController extends AbstractController
         if (isset($data['permisConduite'])) $client->setPermisConduite($data['permisConduite']);
         if (isset($data['nationalite']))    $client->setNationalite($data['nationalite']);
         if (isset($data['telephone']))      $client->setTelephone($data['telephone']);
-        $client->setEditAu(new \DateTime());
+        $client->setEditAu(new \DateTimeImmutable());
 
         $em->flush();
 

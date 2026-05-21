@@ -52,9 +52,9 @@ class PaiementController extends AbstractController
 
         $paiement = new Paiement();
         $paiement->setMontant($data['montant']);
-        $paiement->setDatePaiement(new \DateTime($data['datePaiement']));
+        $paiement->setDatePaiement(new \DateTimeImmutable($data['datePaiement']));
         $paiement->setStatut($data['statut'] ?? 'payé');
-        $paiement->setCreeAu(new \DateTime());
+        $paiement->setCreeAu(new \DateTimeImmutable());
         $paiement->setCreePar($this->getUser());
 
         if (isset($data['creditId'])) {
@@ -74,7 +74,7 @@ class PaiementController extends AbstractController
         $data = json_decode($request->getContent(), true);
 
         if (isset($data['montant']))      $paiement->setMontant($data['montant']);
-        if (isset($data['datePaiement'])) $paiement->setDatePaiement(new \DateTime($data['datePaiement']));
+        if (isset($data['datePaiement'])) $paiement->setDatePaiement(new \DateTimeImmutable($data['datePaiement']));
         if (isset($data['statut']))       $paiement->setStatut($data['statut']);
 
         $em->flush();

@@ -18,14 +18,11 @@ class ReparationController extends AbstractController
     public function list(ReparationRepository $repo): JsonResponse
     {
         $data = array_map(fn($r) => [
-            'id'          => $r->getId(),
-            'date'        => $r->getDate()?->format('Y-m-d'),
-            'description' => $r->getDescription(),
-            'prixTotal'   => $r->getPrixTotal(),
-            'prixPayee'   => $r->getPrixPayee(),
-            'depense'     => $r->getDepense()?->getId(),
-            'creePar'     => $r->getCreePar()?->getId(),
-            'creeAu'      => $r->getCreeAu()?->format('Y-m-d H:i:s'),
+            'id'                    => $r->getId(),
+            'descriptionTechnique'  => $r->getDescriptionTechnique(),
+            'depense'               => $r->getDepense()?->getId(),
+            'creePar'               => $r->getCreePar()?->getId(),
+            'creeAu'                => $r->getCreeAu()?->format('Y-m-d H:i:s'),
         ], $repo->findAll());
 
         return $this->json($data);
@@ -35,13 +32,10 @@ class ReparationController extends AbstractController
     public function show(Reparation $reparation): JsonResponse
     {
         return $this->json([
-            'id'          => $reparation->getId(),
-            'date'        => $reparation->getDate()?->format('Y-m-d'),
-            'description' => $reparation->getDescription(),
-            'prixTotal'   => $reparation->getPrixTotal(),
-            'prixPayee'   => $reparation->getPrixPayee(),
-            'depense'     => $reparation->getDepense()?->getId(),
-            'creePar'     => $reparation->getCreePar()?->getId(),
+            'id'                   => $reparation->getId(),
+            'descriptionTechnique' => $reparation->getDescriptionTechnique(),
+            'depense'              => $reparation->getDepense()?->getId(),
+            'creePar'              => $reparation->getCreePar()?->getId(),
         ]);
     }
 
@@ -54,11 +48,8 @@ class ReparationController extends AbstractController
         $data = json_decode($request->getContent(), true);
 
         $reparation = new Reparation();
-        $reparation->setDate(new \DateTime($data['date']));
-        $reparation->setDescription($data['description']);
-        $reparation->setPrixTotal($data['prixTotal']);
-        $reparation->setPrixPayee($data['prixPayee'] ?? 0);
-        $reparation->setCreeAu(new \DateTime());
+        $reparation->setDescriptionTechnique($data['descriptionTechnique']);
+        $reparation->setCreeAu(new \DateTimeImmutable());
         $reparation->setCreePar($this->getUser());
 
         if (isset($data['depenseId'])) {
@@ -77,11 +68,8 @@ class ReparationController extends AbstractController
     {
         $data = json_decode($request->getContent(), true);
 
-        if (isset($data['date']))        $reparation->setDate(new \DateTime($data['date']));
-        if (isset($data['description'])) $reparation->setDescription($data['description']);
-        if (isset($data['prixTotal']))   $reparation->setPrixTotal($data['prixTotal']);
-        if (isset($data['prixPayee']))   $reparation->setPrixPayee($data['prixPayee']);
-        $reparation->setEditAu(new \DateTime());
+        if (isset($data['descriptionTechnique'])) $reparation->setDescriptionTechnique($data['descriptionTechnique']);
+        $reparation->setEditAu(new \DateTimeImmutable());
 
         $em->flush();
 

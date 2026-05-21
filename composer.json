@@ -7,6 +7,7 @@
         "php": ">=8.2",
         "ext-ctype": "*",
         "ext-iconv": "*",
+        "doctrine/dbal": "3.10",
         "doctrine/doctrine-bundle": "^2.18",
         "doctrine/doctrine-migrations-bundle": "^3.7",
         "doctrine/orm": "^3.6",
@@ -18,13 +19,15 @@
         "symfony/dotenv": "7.2.*",
         "symfony/flex": "^2",
         "symfony/framework-bundle": "7.2.*",
+        "symfony/mailer": "7.2.*",
         "symfony/property-access": "7.2.*",
         "symfony/property-info": "7.2.*",
         "symfony/runtime": "7.2.*",
         "symfony/security-bundle": "7.2.*",
         "symfony/serializer": "7.2.*",
         "symfony/validator": "7.2.*",
-        "symfony/yaml": "7.2.*"
+        "symfony/yaml": "7.2.*",
+        "vich/uploader-bundle": "^2.9"
     },
     "config": {
         "allow-plugins": {

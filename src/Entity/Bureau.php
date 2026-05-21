@@ -17,80 +17,27 @@ class Bureau
     private ?string $nom = null;
 
     #[ORM\Column(length: 50)]
-    private ?string $status = null;
+    private ?string $statut = null;
 
-    #[ORM\Column]
-    private ?\DateTime $creeAu = null;
-
-    #[ORM\Column(nullable: true)]
-    private ?\DateTime $editAu = null;
-
-    #[ORM\ManyToOne]
-    #[ORM\JoinColumn(nullable: false)]
+    #[ORM\ManyToOne(targetEntity: Utilisateur::class)]
+    #[ORM\JoinColumn(nullable: true)]
     private ?Utilisateur $creePar = null;
 
-    public function getId(): ?int
-    {
-        return $this->id;
-    }
+    #[ORM\Column(type: 'datetime_immutable')]
+    private ?\DateTimeImmutable $creeAu = null;
 
-    public function getNom(): ?string
-    {
-        return $this->nom;
-    }
+    #[ORM\Column(type: 'datetime_immutable', nullable: true)]
+    private ?\DateTimeImmutable $editAu = null;
 
-    public function setNom(string $nom): static
-    {
-        $this->nom = $nom;
-
-        return $this;
-    }
-
-    public function getStatus(): ?string
-    {
-        return $this->status;
-    }
-
-    public function setStatus(string $status): static
-    {
-        $this->status = $status;
-
-        return $this;
-    }
-
-    public function getCreeAu(): ?\DateTime
-    {
-        return $this->creeAu;
-    }
-
-    public function setCreeAu(\DateTime $creeAu): static
-    {
-        $this->creeAu = $creeAu;
-
-        return $this;
-    }
-
-    public function getEditAu(): ?\DateTime
-    {
-        return $this->editAu;
-    }
-
-    public function setEditAu(?\DateTime $editAu): static
-    {
-        $this->editAu = $editAu;
-
-        return $this;
-    }
-
-    public function getCreePar(): ?Utilisateur
-    {
-        return $this->creePar;
-    }
-
-    public function setCreePar(?Utilisateur $creePar): static
-    {
-        $this->creePar = $creePar;
-
-        return $this;
-    }
+    public function getId(): ?int { return $this->id; }
+    public function getNom(): ?string { return $this->nom; }
+    public function setNom(string $nom): static { $this->nom = $nom; return $this; }
+    public function getStatut(): ?string { return $this->statut; }
+    public function setStatut(string $statut): static { $this->statut = $statut; return $this; }
+    public function getCreePar(): ?Utilisateur { return $this->creePar; }
+    public function setCreePar(?Utilisateur $creePar): static { $this->creePar = $creePar; return $this; }
+    public function getCreeAu(): ?\DateTimeImmutable { return $this->creeAu; }
+    public function setCreeAu(?\DateTimeImmutable $creeAu): static { $this->creeAu = $creeAu; return $this; }
+    public function getEditAu(): ?\DateTimeImmutable { return $this->editAu; }
+    public function setEditAu(?\DateTimeImmutable $editAu): static { $this->editAu = $editAu; return $this; }
 }

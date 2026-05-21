@@ -60,11 +60,11 @@ class InfractionController extends AbstractController
         $infraction = new Infraction();
         $infraction->setNumeroInfraction($data['numeroInfraction']);
         $infraction->setType($data['type']);
-        $infraction->setDateSaisie(new \DateTime($data['dateSaisie']));
+        $infraction->setDateSaisie(new \DateTimeImmutable($data['dateSaisie']));
         $infraction->setPrix($data['prix']);
         $infraction->setStatut($data['statut'] ?? 'en_attente');
-        $infraction->setDatePaiement(isset($data['datePaiement']) ? new \DateTime($data['datePaiement']) : null);
-        $infraction->setCreeAu(new \DateTime());
+        $infraction->setDatePaiement(isset($data['datePaiement']) ? new \DateTimeImmutable($data['datePaiement']) : null);
+        $infraction->setCreeAu(new \DateTimeImmutable());
         $infraction->setCreePar($this->getUser());
 
         if (isset($data['reservationId'])) {
@@ -85,11 +85,11 @@ class InfractionController extends AbstractController
 
         if (isset($data['numeroInfraction'])) $infraction->setNumeroInfraction($data['numeroInfraction']);
         if (isset($data['type']))             $infraction->setType($data['type']);
-        if (isset($data['dateSaisie']))       $infraction->setDateSaisie(new \DateTime($data['dateSaisie']));
+        if (isset($data['dateSaisie']))       $infraction->setDateSaisie(new \DateTimeImmutable($data['dateSaisie']));
         if (isset($data['prix']))             $infraction->setPrix($data['prix']);
         if (isset($data['statut']))           $infraction->setStatut($data['statut']);
-        if (isset($data['datePaiement']))     $infraction->setDatePaiement(new \DateTime($data['datePaiement']));
-        $infraction->setEditAu(new \DateTime());
+        if (isset($data['datePaiement']))     $infraction->setDatePaiement(new \DateTimeImmutable($data['datePaiement']));
+        $infraction->setEditAu(new \DateTimeImmutable());
 
         $em->flush();
 

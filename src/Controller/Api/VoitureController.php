@@ -12,12 +12,35 @@ use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Annotation\Route;
 
 #[Route('/api/voiture', name: 'app_api_voiture_')]
-final class VoitureController extends AbstractController
+class VoitureController extends AbstractController
 {
     #[Route('', name: 'list', methods: ['GET'])]
-    public function list(VoitureRepository $repo): JsonResponse
+    public function list(Request $request, VoitureRepository $repo): JsonResponse
     {
-        $voitures = $repo->findAll();
+        // 1. Get query parameters
+        $page = (int) $request->query->get('page', 1);
+        $limit = (int) $request->query->get('limit', 10);
+        $search = $request->query->get('search', '');
+        $voitureStatus = $request->query->get('voitureStatus', '');
+        $typeCarburant = $request->query->get('typeCarburant', '');
+        $sort = $request->query->get('sort', 'id');
+        $direction = $request->query->get('direction', 'ASC');
+
+        // 2. Build filters array
+        $filters = [
+            'search' => $search,
+            'voitureStatus' => $voitureStatus,
+            'typeCarburant' => $typeCarburant,
+            'sort' => $sort,
+            'direction' => $direction,
+        ];
+
+        // 3. Get voitures and total count
+        $voitures = $repo->findWithFilters($filters, $page, $limit);
+        $total = $repo->countWithFilters($filters);
+        $pages = ceil($total / $limit);
+
+        // 4. Format response
         $data = array_map(fn($v) => [
             'id'                => $v->getId(),
             'marque'            => $v->getMarque(),
@@ -31,9 +54,18 @@ final class VoitureController extends AbstractController
             'voitureStatus'     => $v->getVoitureStatus(),
             'reservationStatus' => $v->getReservationStatus(),
             'bureau'            => $v->getBureau()?->getId(),
+            'image' => $v->getImagePath(), 
         ], $voitures);
 
-        return $this->json($data);
+        return $this->json([
+            'data' => $data,
+            'meta' => [
+                'page' => $page,
+                'limit' => $limit,
+                'total' => $total,
+                'pages' => (int) $pages,
+            ]
+        ]);
     }
 
     #[Route('/{id}', name: 'show', methods: ['GET'])]
@@ -56,6 +88,7 @@ final class VoitureController extends AbstractController
             'creePar'           => $voiture->getCreePar()?->getId(),
             'creeAu'            => $voiture->getCreeAu()?->format('Y-m-d H:i:s'),
             'editAu'            => $voiture->getEditAu()?->format('Y-m-d H:i:s'),
+            'image' => $v->getImagePath(),
         ]);
     }
 
@@ -65,32 +98,61 @@ final class VoitureController extends AbstractController
         EntityManagerInterface $em,
         BureauRepository $bureauRepo
     ): JsonResponse {
-        $data = json_decode($request->getContent(), true);
-
         $voiture = new Voiture();
-        $voiture->setMarque($data['marque']);
-        $voiture->setModele($data['modele']);
-        $voiture->setAnnee($data['annee']);
-        $voiture->setKilometrageActuel($data['kilometrageActuel'] ?? 0);
-        $voiture->setTypeCarburant($data['typeCarburant']);
-        $voiture->setCouleur($data['couleur'] ?? null);
-        $voiture->setClimatisation($data['climatisation'] ?? false);
-        $voiture->setPrixJour($data['prixJour']);
-        $voiture->setPrixAchat($data['prixAchat'] ?? null);
-        $voiture->setVoitureStatus($data['voitureStatus'] ?? 'available');
-        $voiture->setReservationStatus($data['reservationStatus'] ?? 'confirmed');
-        $voiture->setCreeAu(new \DateTime());
+
+        // 1. Get data from FormData (Not JSON)
+        // We access fields directly from $request->request
+        $voiture->setMarque($request->request->get('marque'));
+        $voiture->setModele($request->request->get('modele'));
+        $voiture->setAnnee($request->request->get('annee'));
+        
+        // Cast to int for safety
+        $voiture->setKilometrageActuel((int) $request->request->get('kilometrageActuel', 0));
+        
+        $voiture->setTypeCarburant($request->request->get('typeCarburant'));
+        $voiture->setCouleur($request->request->get('couleur'));
+
+        // Handle Boolean (Checkbox)
+        $climatisation = $request->request->get('climatisation');
+        $voiture->setClimatisation($climatisation === 'true' || $climatisation === 1 || $climatisation === true);
+
+        $voiture->setPrixJour($request->request->get('prixJour'));
+        $voiture->setPrixAchat($request->request->get('prixAchat'));
+        $voiture->setVoitureStatus($request->request->get('voitureStatus', 'available'));
+        $voiture->setReservationStatus($request->request->get('reservationStatus', 'confirmed'));
+        
+        $voiture->setCreeAu(new \DateTimeImmutable());
         $voiture->setCreePar($this->getUser());
 
-        if (isset($data['bureauId'])) {
-            $bureau = $bureauRepo->find($data['bureauId']);
-            if ($bureau) $voiture->setBureau($bureau);
+        // Bureau Logic
+        if ($request->request->get('bureauId')) {
+            $bureau = $bureauRepo->find($request->request->get('bureauId'));
+            if ($bureau) {
+                $voiture->setBureau($bureau);
+            }
         }
 
+        // 2. HANDLE THE IMAGE UPLOAD
+        // We use $request->files->get() to get the uploaded file
+        $file = $request->files->get('imageFile');
+
+        if ($file) {
+            // VICH UPLOADER MAGIC:
+            // This triggers the event listener to move the file
+            $voiture->setImageFile($file);
+        }
+
+        // 3. Save
         $em->persist($voiture);
         $em->flush();
 
-        return $this->json(['message' => 'Voiture créée', 'id' => $voiture->getId()], 201);
+        // 4. Return Response
+        return $this->json([
+            'message' => 'Voiture créée avec succès',
+            'id' => $voiture->getId(),
+            // Return the image path so Angular can display it
+            'image' => $voiture->getImagePath() 
+        ], 201);
     }
 
     #[Route('/{id}', name: 'update', methods: ['PUT'])]
@@ -108,7 +170,7 @@ final class VoitureController extends AbstractController
         if (isset($data['prixJour']))          $voiture->setPrixJour($data['prixJour']);
         if (isset($data['voitureStatus']))     $voiture->setVoitureStatus($data['voitureStatus']);
         if (isset($data['reservationStatus'])) $voiture->setReservationStatus($data['reservationStatus']);
-        $voiture->setEditAu(new \DateTime());
+        $voiture->setEditAu(new \DateTimeImmutable());
 
         $em->flush();
 

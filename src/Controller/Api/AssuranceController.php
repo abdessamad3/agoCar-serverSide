@@ -18,14 +18,13 @@ class AssuranceController extends AbstractController
     public function list(AssuranceRepository $repo): JsonResponse
     {
         $data = array_map(fn($a) => [
-            'id'           => $a->getId(),
-            'prix'         => $a->getPrix(),
-            'datePaiement' => $a->getDatePaiement()?->format('Y-m-d'),
-            'statut'       => $a->getStatut(),
-            'numeroMoi'    => $a->getNumeroMoi(),
-            'depense'      => $a->getDepense()?->getId(),
-            'creePar'      => $a->getCreePar()?->getId(),
-            'creeAu'       => $a->getCreeAu()?->format('Y-m-d H:i:s'),
+            'id'            => $a->getId(),
+            'dateDebut'     => $a->getDateDebut()?->format('Y-m-d'),
+            'dateFin'       => $a->getDateFin()?->format('Y-m-d'),
+            'numeroContrat' => $a->getNumeroContrat(),
+            'depense'       => $a->getDepense()?->getId(),
+            'creePar'       => $a->getCreePar()?->getId(),
+            'creeAu'        => $a->getCreeAu()?->format('Y-m-d H:i:s'),
         ], $repo->findAll());
 
         return $this->json($data);
@@ -35,13 +34,12 @@ class AssuranceController extends AbstractController
     public function show(Assurance $assurance): JsonResponse
     {
         return $this->json([
-            'id'           => $assurance->getId(),
-            'prix'         => $assurance->getPrix(),
-            'datePaiement' => $assurance->getDatePaiement()?->format('Y-m-d'),
-            'statut'       => $assurance->getStatut(),
-            'numeroMoi'    => $assurance->getNumeroMoi(),
-            'depense'      => $assurance->getDepense()?->getId(),
-            'creePar'      => $assurance->getCreePar()?->getId(),
+            'id'            => $assurance->getId(),
+            'dateDebut'     => $assurance->getDateDebut()?->format('Y-m-d'),
+            'dateFin'       => $assurance->getDateFin()?->format('Y-m-d'),
+            'numeroContrat' => $assurance->getNumeroContrat(),
+            'depense'       => $assurance->getDepense()?->getId(),
+            'creePar'       => $assurance->getCreePar()?->getId(),
         ]);
     }
 
@@ -54,11 +52,10 @@ class AssuranceController extends AbstractController
         $data = json_decode($request->getContent(), true);
 
         $assurance = new Assurance();
-        $assurance->setPrix($data['prix']);
-        $assurance->setDatePaiement(new \DateTime($data['datePaiement']));
-        $assurance->setStatut($data['statut'] ?? 'actif');
-        $assurance->setNumeroMoi($data['numeroMoi']);
-        $assurance->setCreeAu(new \DateTime());
+        $assurance->setDateDebut(new \DateTimeImmutable($data['dateDebut']));
+        $assurance->setDateFin(new \DateTimeImmutable($data['dateFin']));
+        $assurance->setNumeroContrat($data['numeroContrat']);
+        $assurance->setCreeAu(new \DateTimeImmutable());
         $assurance->setCreePar($this->getUser());
 
         if (isset($data['depenseId'])) {
@@ -77,11 +74,10 @@ class AssuranceController extends AbstractController
     {
         $data = json_decode($request->getContent(), true);
 
-        if (isset($data['prix']))         $assurance->setPrix($data['prix']);
-        if (isset($data['datePaiement'])) $assurance->setDatePaiement(new \DateTime($data['datePaiement']));
-        if (isset($data['statut']))       $assurance->setStatut($data['statut']);
-        if (isset($data['numeroMoi']))    $assurance->setNumeroMoi($data['numeroMoi']);
-        $assurance->setEditAu(new \DateTime());
+        if (isset($data['dateDebut']))     $assurance->setDateDebut(new \DateTimeImmutable($data['dateDebut']));
+        if (isset($data['dateFin']))       $assurance->setDateFin(new \DateTimeImmutable($data['dateFin']));
+        if (isset($data['numeroContrat'])) $assurance->setNumeroContrat($data['numeroContrat']);
+        $assurance->setEditAu(new \DateTimeImmutable());
 
         $em->flush();
 

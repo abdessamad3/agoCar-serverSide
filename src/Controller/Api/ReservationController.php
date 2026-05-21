@@ -13,9 +13,9 @@ use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Annotation\Route;
 
 #[Route('/api/reservation', name: 'app_api_reservation_')]
-final class ReservationController extends AbstractController
+class ReservationController extends AbstractController
 {
-     #[Route('', name: 'list', methods: ['GET'])]
+    #[Route('', name: 'list', methods: ['GET'])]
     public function list(ReservationRepository $repo): JsonResponse
     {
         $reservations = $repo->findAll();
@@ -76,17 +76,16 @@ final class ReservationController extends AbstractController
 
         $reservation->setClient($client);
         $reservation->setVoiture($voiture);
-        $reservation->setDateDebut(new \DateTime($data['dateDebut']));
-        $reservation->setDateFin(new \DateTime($data['dateFin']));
+        $reservation->setDateDebut(new \DateTimeImmutable($data['dateDebut']));
+        $reservation->setDateFin(new \DateTimeImmutable($data['dateFin']));
         $reservation->setTotal($data['total']);
         $reservation->setMontantPaye($data['montantPaye'] ?? 0);
         $reservation->setMontantRestant($data['montantRestant'] ?? $data['total']);
         $reservation->setLavage($data['lavage'] ?? false);
         $reservation->setDescription($data['description'] ?? null);
-        $reservation->setCreeAu(new \DateTime());
+        $reservation->setCreeAu(new \DateTimeImmutable());
         $reservation->setCreePar($this->getUser());
 
-        // update voiture status
         $voiture->setVoitureStatus('rented');
         $voiture->setReservationStatus('confirmed');
 
@@ -101,14 +100,14 @@ final class ReservationController extends AbstractController
     {
         $data = json_decode($request->getContent(), true);
 
-        if (isset($data['dateDebut']))      $reservation->setDateDebut(new \DateTime($data['dateDebut']));
-        if (isset($data['dateFin']))        $reservation->setDateFin(new \DateTime($data['dateFin']));
+        if (isset($data['dateDebut']))      $reservation->setDateDebut(new \DateTimeImmutable($data['dateDebut']));
+        if (isset($data['dateFin']))        $reservation->setDateFin(new \DateTimeImmutable($data['dateFin']));
         if (isset($data['total']))          $reservation->setTotal($data['total']);
         if (isset($data['montantPaye']))    $reservation->setMontantPaye($data['montantPaye']);
         if (isset($data['montantRestant'])) $reservation->setMontantRestant($data['montantRestant']);
         if (isset($data['lavage']))         $reservation->setLavage($data['lavage']);
         if (isset($data['description']))    $reservation->setDescription($data['description']);
-        $reservation->setEditAu(new \DateTime());
+        $reservation->setEditAu(new \DateTimeImmutable());
 
         $em->flush();
 

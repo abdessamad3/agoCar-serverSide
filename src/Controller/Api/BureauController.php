@@ -4,6 +4,7 @@ namespace App\Controller\Api;
 
 use App\Entity\Bureau;
 use App\Repository\BureauRepository;
+use Doctrine\DBAL\Exception\ForeignKeyConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -11,9 +12,9 @@ use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Annotation\Route;
 
 #[Route('/api/bureau', name: 'app_api_bureau_')]
-final class BureauController extends AbstractController
+class BureauController extends AbstractController
 {
-       #[Route('', name: 'list', methods: ['GET'])]
+    #[Route('', name: 'list', methods: ['GET'])]
     public function list(BureauRepository $repo): JsonResponse
     {
         $bureaux = $repo->findAll();
@@ -47,7 +48,7 @@ final class BureauController extends AbstractController
         $bureau = new Bureau();
         $bureau->setNom($data['nom']);
         $bureau->setStatut($data['statut'] ?? 'actif');
-        $bureau->setCreeAu(new \DateTime());
+        $bureau->setCreeAu(new \DateTimeImmutable());
         $bureau->setCreePar($this->getUser());
 
         $em->persist($bureau);
@@ -63,19 +64,34 @@ final class BureauController extends AbstractController
 
         if (isset($data['nom']))    $bureau->setNom($data['nom']);
         if (isset($data['statut'])) $bureau->setStatut($data['statut']);
-        $bureau->setEditAu(new \DateTime());
+        $bureau->setEditAu(new \DateTimeImmutable());
 
         $em->flush();
 
         return $this->json(['message' => 'Bureau mis à jour']);
     }
 
-    #[Route('/{id}', name: 'delete', methods: ['DELETE'])]
-    public function delete(Bureau $bureau, EntityManagerInterface $em): JsonResponse
-    {
+  #[Route('/{id}', name: 'app_api_bureau_delete', methods: ['DELETE'])]
+public function delete(int $id, BureauRepository $repo, EntityManagerInterface $em): JsonResponse
+{
+    $bureau = $repo->find($id);
+
+    if (!$bureau) {
+        return $this->json(['message' => 'Bureau not found'], 404);
+    }
+
+    try {
+        // Attempt to delete
         $em->remove($bureau);
         $em->flush();
 
-        return $this->json(['message' => 'Bureau supprimé'], 204);
+        return $this->json(['message' => 'Bureau deleted successfully'], 204);
+
+    } catch (ForeignKeyConstraintViolationException $e) {
+        // CATCH THE ERROR HERE!
+        return $this->json([
+            'message' => 'Cannot delete this bureau. It currently has cars assigned to it.'
+        ], 409); // 409 = "Conflict" (The perfect status code for this)
     }
+}
 }

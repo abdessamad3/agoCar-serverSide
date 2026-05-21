@@ -49,7 +49,7 @@ class AccessoireController extends AbstractController
         $accessoire->setNom($data['nom']);
         $accessoire->setPrix($data['prix']);
         $accessoire->setTypePaiement($data['typePaiement'] ?? null);
-        $accessoire->setCreeAu(new \DateTime());
+        $accessoire->setCreeAu(new \DateTimeImmutable());
         $accessoire->setCreePar($this->getUser());
 
         $em->persist($accessoire);
@@ -66,7 +66,7 @@ class AccessoireController extends AbstractController
         if (isset($data['nom']))          $accessoire->setNom($data['nom']);
         if (isset($data['prix']))         $accessoire->setPrix($data['prix']);
         if (isset($data['typePaiement'])) $accessoire->setTypePaiement($data['typePaiement']);
-        $accessoire->setEditAu(new \DateTime());
+        $accessoire->setEditAu(new \DateTimeImmutable());
 
         $em->flush();
 

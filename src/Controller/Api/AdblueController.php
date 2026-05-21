@@ -18,12 +18,11 @@ class AdblueController extends AbstractController
     public function list(AdblueRepository $repo): JsonResponse
     {
         $data = array_map(fn($a) => [
-            'id'      => $a->getId(),
-            'date'    => $a->getDate()?->format('Y-m-d'),
-            'prix'    => $a->getPrix(),
-            'depense' => $a->getDepense()?->getId(),
-            'creePar' => $a->getCreePar()?->getId(),
-            'creeAu'  => $a->getCreeAu()?->format('Y-m-d H:i:s'),
+            'id'             => $a->getId(),
+            'quantiteLitre'  => $a->getQuantiteLitre(),
+            'depense'        => $a->getDepense()?->getId(),
+            'creePar'        => $a->getCreePar()?->getId(),
+            'creeAu'         => $a->getCreeAu()?->format('Y-m-d H:i:s'),
         ], $repo->findAll());
 
         return $this->json($data);
@@ -33,11 +32,10 @@ class AdblueController extends AbstractController
     public function show(Adblue $adblue): JsonResponse
     {
         return $this->json([
-            'id'      => $adblue->getId(),
-            'date'    => $adblue->getDate()?->format('Y-m-d'),
-            'prix'    => $adblue->getPrix(),
-            'depense' => $adblue->getDepense()?->getId(),
-            'creePar' => $adblue->getCreePar()?->getId(),
+            'id'            => $adblue->getId(),
+            'quantiteLitre' => $adblue->getQuantiteLitre(),
+            'depense'       => $adblue->getDepense()?->getId(),
+            'creePar'       => $adblue->getCreePar()?->getId(),
         ]);
     }
 
@@ -50,9 +48,8 @@ class AdblueController extends AbstractController
         $data = json_decode($request->getContent(), true);
 
         $adblue = new Adblue();
-        $adblue->setDate(new \DateTime($data['date']));
-        $adblue->setPrix($data['prix']);
-        $adblue->setCreeAu(new \DateTime());
+        $adblue->setQuantiteLitre($data['quantiteLitre']);
+        $adblue->setCreeAu(new \DateTimeImmutable());
         $adblue->setCreePar($this->getUser());
 
         if (isset($data['depenseId'])) {
@@ -63,7 +60,7 @@ class AdblueController extends AbstractController
         $em->persist($adblue);
         $em->flush();
 
-        return $this->json(['message' => 'Adblue créé', 'id' => $adblue->getId()], 201);
+        return $this->json(['message' => 'AdBlue créé', 'id' => $adblue->getId()], 201);
     }
 
     #[Route('/{id}', name: 'update', methods: ['PUT'])]
@@ -71,13 +68,12 @@ class AdblueController extends AbstractController
     {
         $data = json_decode($request->getContent(), true);
 
-        if (isset($data['date'])) $adblue->setDate(new \DateTime($data['date']));
-        if (isset($data['prix'])) $adblue->setPrix($data['prix']);
-        $adblue->setEditAu(new \DateTime());
+        if (isset($data['quantiteLitre'])) $adblue->setQuantiteLitre($data['quantiteLitre']);
+        $adblue->setEditAu(new \DateTimeImmutable());
 
         $em->flush();
 
-        return $this->json(['message' => 'Adblue mis à jour']);
+        return $this->json(['message' => 'AdBlue mis à jour']);
     }
 
     #[Route('/{id}', name: 'delete', methods: ['DELETE'])]
@@ -86,6 +82,6 @@ class AdblueController extends AbstractController
         $em->remove($adblue);
         $em->flush();
 
-        return $this->json(['message' => 'Adblue supprimé'], 204);
+        return $this->json(['message' => 'AdBlue supprimé'], 204);
     }
 }

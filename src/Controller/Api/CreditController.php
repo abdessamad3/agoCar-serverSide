@@ -66,11 +66,11 @@ class CreditController extends AbstractController
         $credit = new Credit();
         $credit->setMontantTotal($data['montantTotal']);
         $credit->setMensualite($data['mensualite']);
-        $credit->setDateDebut(new \DateTime($data['dateDebut']));
-        $credit->setDateFin(new \DateTime($data['dateFin']));
+        $credit->setDateDebut(new \DateTimeImmutable($data['dateDebut']));
+        $credit->setDateFin(new \DateTimeImmutable($data['dateFin']));
         $credit->setDureeMois($data['dureeMois']);
         $credit->setStatut($data['statut'] ?? 'en_cours');
-        $credit->setCreeAu(new \DateTime());
+        $credit->setCreeAu(new \DateTimeImmutable());
         $credit->setCreePar($this->getUser());
 
         if (isset($data['voitureId'])) {
@@ -91,11 +91,11 @@ class CreditController extends AbstractController
 
         if (isset($data['montantTotal'])) $credit->setMontantTotal($data['montantTotal']);
         if (isset($data['mensualite']))   $credit->setMensualite($data['mensualite']);
-        if (isset($data['dateDebut']))    $credit->setDateDebut(new \DateTime($data['dateDebut']));
-        if (isset($data['dateFin']))      $credit->setDateFin(new \DateTime($data['dateFin']));
+        if (isset($data['dateDebut']))    $credit->setDateDebut(new \DateTimeImmutable($data['dateDebut']));
+        if (isset($data['dateFin']))      $credit->setDateFin(new \DateTimeImmutable($data['dateFin']));
         if (isset($data['dureeMois']))    $credit->setDureeMois($data['dureeMois']);
         if (isset($data['statut']))       $credit->setStatut($data['statut']);
-        $credit->setEditAu(new \DateTime());
+        $credit->setEditAu(new \DateTimeImmutable());
 
         $em->flush();
 

@@ -18,14 +18,12 @@ class VignetteController extends AbstractController
     public function list(VignetteRepository $repo): JsonResponse
     {
         $data = array_map(fn($v) => [
-            'id'           => $v->getId(),
-            'annee'        => $v->getAnnee(),
-            'prix'         => $v->getPrix(),
-            'datePaiement' => $v->getDatePaiement()?->format('Y-m-d'),
-            'dateLimite'   => $v->getDateLimite()?->format('Y-m-d'),
-            'depense'      => $v->getDepense()?->getId(),
-            'creePar'      => $v->getCreePar()?->getId(),
-            'creeAu'       => $v->getCreeAu()?->format('Y-m-d H:i:s'),
+            'id'         => $v->getId(),
+            'annee'      => $v->getAnnee(),
+            'dateLimite' => $v->getDateLimite()?->format('Y-m-d'),
+            'depense'    => $v->getDepense()?->getId(),
+            'creePar'    => $v->getCreePar()?->getId(),
+            'creeAu'     => $v->getCreeAu()?->format('Y-m-d H:i:s'),
         ], $repo->findAll());
 
         return $this->json($data);
@@ -35,13 +33,11 @@ class VignetteController extends AbstractController
     public function show(Vignette $vignette): JsonResponse
     {
         return $this->json([
-            'id'           => $vignette->getId(),
-            'annee'        => $vignette->getAnnee(),
-            'prix'         => $vignette->getPrix(),
-            'datePaiement' => $vignette->getDatePaiement()?->format('Y-m-d'),
-            'dateLimite'   => $vignette->getDateLimite()?->format('Y-m-d'),
-            'depense'      => $vignette->getDepense()?->getId(),
-            'creePar'      => $vignette->getCreePar()?->getId(),
+            'id'         => $vignette->getId(),
+            'annee'      => $vignette->getAnnee(),
+            'dateLimite' => $vignette->getDateLimite()?->format('Y-m-d'),
+            'depense'    => $vignette->getDepense()?->getId(),
+            'creePar'    => $vignette->getCreePar()?->getId(),
         ]);
     }
 
@@ -55,10 +51,8 @@ class VignetteController extends AbstractController
 
         $vignette = new Vignette();
         $vignette->setAnnee($data['annee']);
-        $vignette->setPrix($data['prix']);
-        $vignette->setDatePaiement(new \DateTime($data['datePaiement']));
-        $vignette->setDateLimite(new \DateTime($data['dateLimite']));
-        $vignette->setCreeAu(new \DateTime());
+        $vignette->setDateLimite(new \DateTimeImmutable($data['dateLimite']));
+        $vignette->setCreeAu(new \DateTimeImmutable());
         $vignette->setCreePar($this->getUser());
 
         if (isset($data['depenseId'])) {
@@ -77,11 +71,9 @@ class VignetteController extends AbstractController
     {
         $data = json_decode($request->getContent(), true);
 
-        if (isset($data['annee']))        $vignette->setAnnee($data['annee']);
-        if (isset($data['prix']))         $vignette->setPrix($data['prix']);
-        if (isset($data['datePaiement'])) $vignette->setDatePaiement(new \DateTime($data['datePaiement']));
-        if (isset($data['dateLimite']))   $vignette->setDateLimite(new \DateTime($data['dateLimite']));
-        $vignette->setEditAu(new \DateTime());
+        if (isset($data['annee']))      $vignette->setAnnee($data['annee']);
+        if (isset($data['dateLimite'])) $vignette->setDateLimite(new \DateTimeImmutable($data['dateLimite']));
+        $vignette->setEditAu(new \DateTimeImmutable());
 
         $em->flush();
 

@@ -52,7 +52,7 @@ class ContratController extends AbstractController
         $data = json_decode($request->getContent(), true);
 
         $contrat = new Contrat();
-        $contrat->setCreeAu(new \DateTime());
+        $contrat->setCreeAu(new \DateTimeImmutable());
         $contrat->setCreePar($this->getUser());
 
         if (isset($data['clientId'])) {

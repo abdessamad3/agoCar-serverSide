@@ -8,7 +8,6 @@ use Symfony\Component\Security\Core\User\UserInterface;
 use Symfony\Component\Security\Core\User\PasswordAuthenticatedUserInterface;
 
 #[ORM\Entity(repositoryClass: UtilisateurRepository::class)]
-#[ORM\Table(name: '`utilisateur`')]
 class Utilisateur implements UserInterface, PasswordAuthenticatedUserInterface
 {
     #[ORM\Id]
@@ -25,114 +24,35 @@ class Utilisateur implements UserInterface, PasswordAuthenticatedUserInterface
     #[ORM\Column(type: 'json')]
     private array $roles = [];
 
-    #[ORM\Column(nullable: true)]
-    private ?\DateTimeInterface $creeAu = null;
+    #[ORM\Column(type: 'datetime_immutable', nullable: true)]
+    private ?\DateTimeImmutable $creeAu = null;
 
-    #[ORM\Column(nullable: true)]
-    private ?\DateTimeInterface $editAu = null;
+    #[ORM\Column(type: 'datetime_immutable', nullable: true)]
+    private ?\DateTimeImmutable $editAu = null;
 
-    #[ORM\ManyToOne]
-    #[ORM\JoinColumn(nullable: false)]
+    #[ORM\ManyToOne(targetEntity: Bureau::class)]
+    #[ORM\JoinColumn(nullable: true)]
     private ?Bureau $bureau = null;
 
     #[ORM\ManyToOne(targetEntity: self::class)]
-    #[ORM\JoinColumn(nullable: false)]
+    #[ORM\JoinColumn(nullable: true)]
     private ?self $creePar = null;
 
-
-    public function getId(): ?int
-    {
-        return $this->id;
-    }
-
-    public function getEmail(): ?string
-    {
-        return $this->email;
-    }
-
-    public function setEmail(string $email): static
-    {
-        $this->email = $email;
-        return $this;
-    }
-
-    public function getUserIdentifier(): string
-    {
-        return (string) $this->email;
-    }
-
-    public function getRoles(): array
-    {
-        $roles = $this->roles;
-        $roles[] = 'ROLE_USER';
-        return array_unique($roles);
-    }
-
-    public function setRoles(array $roles): static
-    {
-        $this->roles = $roles;
-        return $this;
-    }
-
-    public function getPassword(): ?string
-    {
-        return $this->password;
-    }
-
-    public function setPassword(string $password): static
-    {
-        $this->password = $password;
-        return $this;
-    }
-
-    public function eraseCredentials(): void
-    {
-        // clear temporary sensitive data if any
-    }
-
-    public function getCreeAu(): ?\DateTimeInterface
-    {
-        return $this->creeAu;
-    }
-
-    public function setCreeAu(?\DateTimeInterface $creeAu): static
-    {
-        $this->creeAu = $creeAu;
-        return $this;
-    }
-
-    public function getEditAu(): ?\DateTimeInterface
-    {
-        return $this->editAu;
-    }
-
-    public function setEditAu(?\DateTimeInterface $editAu): static
-    {
-        $this->editAu = $editAu;
-        return $this;
-    }
-
-    public function getBureau(): ?Bureau
-    {
-        return $this->bureau;
-    }
-
-    public function setBureau(?Bureau $bureau): static
-    {
-        $this->bureau = $bureau;
-
-        return $this;
-    }
-
-    public function getCreePar(): ?self
-    {
-        return $this->creePar;
-    }
-
-    public function setCreePar(?self $creePar): static
-    {
-        $this->creePar = $creePar;
-
-        return $this;
-    }
+    public function getId(): ?int { return $this->id; }
+    public function getEmail(): ?string { return $this->email; }
+    public function setEmail(string $email): static { $this->email = $email; return $this; }
+    public function getUserIdentifier(): string { return (string) $this->email; }
+    public function getRoles(): array { $roles = $this->roles; $roles[] = 'ROLE_USER'; return array_unique($roles); }
+    public function setRoles(array $roles): static { $this->roles = $roles; return $this; }
+    public function getPassword(): ?string { return $this->password; }
+    public function setPassword(string $password): static { $this->password = $password; return $this; }
+    public function eraseCredentials(): void {}
+    public function getCreeAu(): ?\DateTimeImmutable { return $this->creeAu; }
+    public function setCreeAu(?\DateTimeImmutable $creeAu): static { $this->creeAu = $creeAu; return $this; }
+    public function getEditAu(): ?\DateTimeImmutable { return $this->editAu; }
+    public function setEditAu(?\DateTimeImmutable $editAu): static { $this->editAu = $editAu; return $this; }
+    public function getBureau(): ?Bureau { return $this->bureau; }
+    public function setBureau(?Bureau $bureau): static { $this->bureau = $bureau; return $this; }
+    public function getCreePar(): ?self { return $this->creePar; }
+    public function setCreePar(?self $creePar): static { $this->creePar = $creePar; return $this; }
 }

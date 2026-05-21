@@ -19,13 +19,10 @@ class VidangeController extends AbstractController
     {
         $data = array_map(fn($v) => [
             'id'                 => $v->getId(),
-            'date'               => $v->getDate()?->format('Y-m-d'),
             'kilometrageSuivant' => $v->getKilometrageSuivant(),
             'filtreAir'          => $v->isFiltreAir(),
             'filtreHuile'        => $v->isFiltreHuile(),
             'filtreCarburant'    => $v->isFiltreCarburant(),
-            'prixTotal'          => $v->getPrixTotal(),
-            'prixPayee'          => $v->getPrixPayee(),
             'depense'            => $v->getDepense()?->getId(),
             'creePar'            => $v->getCreePar()?->getId(),
             'creeAu'             => $v->getCreeAu()?->format('Y-m-d H:i:s'),
@@ -39,13 +36,10 @@ class VidangeController extends AbstractController
     {
         return $this->json([
             'id'                 => $vidange->getId(),
-            'date'               => $vidange->getDate()?->format('Y-m-d'),
             'kilometrageSuivant' => $vidange->getKilometrageSuivant(),
             'filtreAir'          => $vidange->isFiltreAir(),
             'filtreHuile'        => $vidange->isFiltreHuile(),
             'filtreCarburant'    => $vidange->isFiltreCarburant(),
-            'prixTotal'          => $vidange->getPrixTotal(),
-            'prixPayee'          => $vidange->getPrixPayee(),
             'depense'            => $vidange->getDepense()?->getId(),
             'creePar'            => $vidange->getCreePar()?->getId(),
         ]);
@@ -60,14 +54,11 @@ class VidangeController extends AbstractController
         $data = json_decode($request->getContent(), true);
 
         $vidange = new Vidange();
-        $vidange->setDate(new \DateTime($data['date']));
         $vidange->setKilometrageSuivant($data['kilometrageSuivant']);
         $vidange->setFiltreAir($data['filtreAir'] ?? false);
         $vidange->setFiltreHuile($data['filtreHuile'] ?? false);
         $vidange->setFiltreCarburant($data['filtreCarburant'] ?? false);
-        $vidange->setPrixTotal($data['prixTotal']);
-        $vidange->setPrixPayee($data['prixPayee'] ?? 0);
-        $vidange->setCreeAu(new \DateTime());
+        $vidange->setCreeAu(new \DateTimeImmutable());
         $vidange->setCreePar($this->getUser());
 
         if (isset($data['depenseId'])) {
@@ -86,14 +77,11 @@ class VidangeController extends AbstractController
     {
         $data = json_decode($request->getContent(), true);
 
-        if (isset($data['date']))                $vidange->setDate(new \DateTime($data['date']));
-        if (isset($data['kilometrageSuivant']))   $vidange->setKilometrageSuivant($data['kilometrageSuivant']);
-        if (isset($data['filtreAir']))            $vidange->setFiltreAir($data['filtreAir']);
-        if (isset($data['filtreHuile']))          $vidange->setFiltreHuile($data['filtreHuile']);
-        if (isset($data['filtreCarburant']))      $vidange->setFiltreCarburant($data['filtreCarburant']);
-        if (isset($data['prixTotal']))            $vidange->setPrixTotal($data['prixTotal']);
-        if (isset($data['prixPayee']))            $vidange->setPrixPayee($data['prixPayee']);
-        $vidange->setEditAu(new \DateTime());
+        if (isset($data['kilometrageSuivant'])) $vidange->setKilometrageSuivant($data['kilometrageSuivant']);
+        if (isset($data['filtreAir']))          $vidange->setFiltreAir($data['filtreAir']);
+        if (isset($data['filtreHuile']))        $vidange->setFiltreHuile($data['filtreHuile']);
+        if (isset($data['filtreCarburant']))    $vidange->setFiltreCarburant($data['filtreCarburant']);
+        $vidange->setEditAu(new \DateTimeImmutable());
 
         $em->flush();
 

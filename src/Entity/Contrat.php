@@ -13,87 +13,32 @@ class Contrat
     #[ORM\Column]
     private ?int $id = null;
 
-    #[ORM\Column]
-    private ?\DateTime $creeAu = null;
-
-    #[ORM\Column(nullable: true)]
-    private ?\DateTime $editAu = null;
-
-    #[ORM\ManyToOne]
+    #[ORM\ManyToOne(targetEntity: Client::class)]
     #[ORM\JoinColumn(nullable: false)]
-    private ?client $client = null;
+    private ?Client $client = null;
 
-
-    #[ORM\ManyToOne]
+    #[ORM\OneToOne(targetEntity: Reservation::class)]
     #[ORM\JoinColumn(nullable: false)]
+    private ?Reservation $reservation = null;
+
+    #[ORM\ManyToOne(targetEntity: Utilisateur::class)]
     private ?Utilisateur $creePar = null;
 
-    #[ORM\OneToOne(cascade: ['persist', 'remove'])]
-    #[ORM\JoinColumn(nullable: false)]
-    private ?reservation $reservation = null;
+    #[ORM\Column(type: 'datetime_immutable')]
+    private ?\DateTimeImmutable $creeAu = null;
 
-    public function getId(): ?int
-    {
-        return $this->id;
-    }
+    #[ORM\Column(type: 'datetime_immutable', nullable: true)]
+    private ?\DateTimeImmutable $editAu = null;
 
-    public function getCreeAu(): ?\DateTime
-    {
-        return $this->creeAu;
-    }
-
-    public function setCreeAu(\DateTime $creeAu): static
-    {
-        $this->creeAu = $creeAu;
-
-        return $this;
-    }
-
-    public function getEditAu(): ?\DateTime
-    {
-        return $this->editAu;
-    }
-
-    public function setEditAu(?\DateTime $editAu): static
-    {
-        $this->editAu = $editAu;
-
-        return $this;
-    }
-
-    public function getClient(): ?client
-    {
-        return $this->client;
-    }
-
-    public function setClient(?client $client): static
-    {
-        $this->client = $client;
-
-        return $this;
-    }
-
-    public function getCreePar(): ?Utilisateur
-    {
-        return $this->creePar;
-    }
-
-    public function setCreePar(?Utilisateur $creePar): static
-    {
-        $this->creePar = $creePar;
-
-        return $this;
-    }
-
-    public function getReservation(): ?reservation
-    {
-        return $this->reservation;
-    }
-
-    public function setReservation(reservation $reservation): static
-    {
-        $this->reservation = $reservation;
-
-        return $this;
-    }
+    public function getId(): ?int { return $this->id; }
+    public function getClient(): ?Client { return $this->client; }
+    public function setClient(?Client $client): static { $this->client = $client; return $this; }
+    public function getReservation(): ?Reservation { return $this->reservation; }
+    public function setReservation(?Reservation $reservation): static { $this->reservation = $reservation; return $this; }
+    public function getCreePar(): ?Utilisateur { return $this->creePar; }
+    public function setCreePar(?Utilisateur $creePar): static { $this->creePar = $creePar; return $this; }
+    public function getCreeAu(): ?\DateTimeImmutable { return $this->creeAu; }
+    public function setCreeAu(?\DateTimeImmutable $creeAu): static { $this->creeAu = $creeAu; return $this; }
+    public function getEditAu(): ?\DateTimeImmutable { return $this->editAu; }
+    public function setEditAu(?\DateTimeImmutable $editAu): static { $this->editAu = $editAu; return $this; }
 }

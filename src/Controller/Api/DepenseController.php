@@ -11,11 +11,12 @@ use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Annotation\Route;
+use App\Enum\StatusEnum;
 
 #[Route('/api/depense', name: 'app_api_depense_')]
-final class DepenseController extends AbstractController
+class DepenseController extends AbstractController
 {
-      #[Route('', name: 'list', methods: ['GET'])]
+    #[Route('', name: 'list', methods: ['GET'])]
     public function list(DepenseRepository $repo): JsonResponse
     {
         $depenses = $repo->findAll();
@@ -25,7 +26,7 @@ final class DepenseController extends AbstractController
             'typeDepense'  => $d->getTypeDepense(),
             'description'  => $d->getDescription(),
             'montant'      => $d->getMontant(),
-            'statut'       => $d->getStatut(),
+            'statut'       => $d->getStatut()?->value,
             'datePaiement' => $d->getDatePaiement()?->format('Y-m-d'),
             'voiture'      => $d->getVoiture()?->getId(),
             'bureau'       => $d->getBureau()?->getId(),
@@ -45,7 +46,7 @@ final class DepenseController extends AbstractController
             'typeDepense'  => $depense->getTypeDepense(),
             'description'  => $depense->getDescription(),
             'montant'      => $depense->getMontant(),
-            'statut'       => $depense->getStatut(),
+            'statut'       => $depense->getStatut()?->value,
             'datePaiement' => $depense->getDatePaiement()?->format('Y-m-d'),
             'voiture'      => $depense->getVoiture()?->getId(),
             'bureau'       => $depense->getBureau()?->getId(),
@@ -65,13 +66,26 @@ final class DepenseController extends AbstractController
         $data = json_decode($request->getContent(), true);
 
         $depense = new Depense();
-        $depense->setDate(new \DateTime($data['date']));
+        $depense->setDate(new \DateTimeImmutable($data['date']));
         $depense->setTypeDepense($data['typeDepense']);
         $depense->setDescription($data['description'] ?? null);
         $depense->setMontant($data['montant']);
-        $depense->setStatut($data['statut'] ?? 'en_attente');
-        $depense->setDatePaiement(isset($data['datePaiement']) ? new \DateTime($data['datePaiement']) : null);
-        $depense->setCreeAu(new \DateTime());
+        // $depense->setStatut($data['statut'] ?? 'pending');
+        try {
+            $statut = isset($data['statut'])
+                ? StatusEnum::from($data['statut'])
+                : StatusEnum::PENDING;
+
+            $depense->setStatut($statut);
+
+        } catch (\ValueError $e) {
+
+            return $this->json([
+                'message' => 'Statut invalide'
+            ], 400);
+        }
+        $depense->setDatePaiement(isset($data['datePaiement']) ? new \DateTimeImmutable($data['datePaiement']) : null);
+        $depense->setCreeAu(new \DateTimeImmutable());
         $depense->setCreePar($this->getUser());
 
         if (isset($data['voitureId'])) {
@@ -95,13 +109,27 @@ final class DepenseController extends AbstractController
     {
         $data = json_decode($request->getContent(), true);
 
-        if (isset($data['date']))         $depense->setDate(new \DateTime($data['date']));
+        if (isset($data['date']))         $depense->setDate(new \DateTimeImmutable($data['date']));
         if (isset($data['typeDepense']))  $depense->setTypeDepense($data['typeDepense']);
         if (isset($data['description']))  $depense->setDescription($data['description']);
         if (isset($data['montant']))      $depense->setMontant($data['montant']);
-        if (isset($data['statut']))       $depense->setStatut($data['statut']);
-        if (isset($data['datePaiement'])) $depense->setDatePaiement(new \DateTime($data['datePaiement']));
-        $depense->setEditAu(new \DateTime());
+        // if (isset($data['statut']))       $depense->setStatut( StatusEnum::from($data['statut']));
+        if (isset($data['statut'])) {
+
+            try {
+                $depense->setStatut(
+                    StatusEnum::from($data['statut'])
+                );
+
+                } catch (\ValueError $e) {
+
+                    return $this->json([
+                        'message' => 'Statut invalide'
+                    ], 400);
+                }
+        }
+        if (isset($data['datePaiement'])) $depense->setDatePaiement(new \DateTimeImmutable($data['datePaiement']));
+        $depense->setEditAu(new \DateTimeImmutable());
 
         $em->flush();
 

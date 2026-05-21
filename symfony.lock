@@ -103,6 +103,18 @@
             "./src/Kernel.php"
         ]
     },
+    "symfony/mailer": {
+        "version": "7.2",
+        "recipe": {
+            "repo": "github.com/symfony/recipes",
+            "branch": "main",
+            "version": "4.3",
+            "ref": "09051cfde49476e3c12cd3a0e44289ace1c75a4f"
+        },
+        "files": [
+            "./config/packages/mailer.yaml"
+        ]
+    },
     "symfony/maker-bundle": {
         "version": "1.67",
         "recipe": {
@@ -148,6 +160,18 @@
         },
         "files": [
             "./config/packages/validator.yaml"
+        ]
+    },
+    "vich/uploader-bundle": {
+        "version": "2.9",
+        "recipe": {
+            "repo": "github.com/symfony/recipes-contrib",
+            "branch": "main",
+            "version": "1.13",
+            "ref": "1b3064c2f6b255c2bc2f56461aaeb76b11e07e36"
+        },
+        "files": [
+            "./config/packages/vich_uploader.yaml"
         ]
     }
 }

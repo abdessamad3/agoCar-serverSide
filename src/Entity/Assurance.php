@@ -3,9 +3,6 @@
 namespace App\Entity;
 
 use App\Repository\AssuranceRepository;
-use Doctrine\Common\Collections\ArrayCollection;
-use Doctrine\Common\Collections\Collection;
-use Doctrine\DBAL\Types\Types;
 use Doctrine\ORM\Mapping as ORM;
 
 #[ORM\Entity(repositoryClass: AssuranceRepository::class)]
@@ -16,149 +13,41 @@ class Assurance
     #[ORM\Column]
     private ?int $id = null;
 
-    #[ORM\Column(type: Types::DECIMAL, precision: 10, scale: 2)]
-    private ?string $prix = null;
-
-    #[ORM\Column(type: Types::DATE_MUTABLE)]
-    private ?\DateTime $datePaiment = null;
-
-    #[ORM\Column(length: 30)]
-    private ?string $statut = null;
-
-    #[ORM\Column]
-    private ?int $numeroMoi = null;
-
-    #[ORM\Column]
-    private ?\DateTime $creeAu = null;
-
-    #[ORM\Column(nullable: true)]
-    private ?\DateTime $editAu = null;
-
-    #[ORM\OneToOne(cascade: ['persist', 'remove'])]
+    #[ORM\OneToOne(targetEntity: Depense::class)]
     #[ORM\JoinColumn(nullable: false)]
     private ?Depense $depense = null;
 
-    /**
-     * @var Collection<int, Utilisateur>
-     */
-    #[ORM\ManyToMany(targetEntity: Utilisateur::class)]
-    private Collection $creePar;
+    #[ORM\Column(type: 'datetime_immutable')]
+    private ?\DateTimeImmutable $dateDebut = null;
 
-    public function __construct()
-    {
-        $this->creePar = new ArrayCollection();
-    }
+    #[ORM\Column(type: 'datetime_immutable')]
+    private ?\DateTimeImmutable $dateFin = null;
 
-    public function getId(): ?int
-    {
-        return $this->id;
-    }
+    #[ORM\Column(length: 50, nullable: true)]
+    private ?string $numeroContrat = null;
 
-    public function getPrix(): ?string
-    {
-        return $this->prix;
-    }
+    #[ORM\ManyToOne(targetEntity: Utilisateur::class)]
+    private ?Utilisateur $creePar = null;
 
-    public function setPrix(string $prix): static
-    {
-        $this->prix = $prix;
+    #[ORM\Column(type: 'datetime_immutable')]
+    private ?\DateTimeImmutable $creeAu = null;
 
-        return $this;
-    }
+    #[ORM\Column(type: 'datetime_immutable', nullable: true)]
+    private ?\DateTimeImmutable $editAu = null;
 
-    public function getDatePaiment(): ?\DateTime
-    {
-        return $this->datePaiment;
-    }
-
-    public function setDatePaiment(\DateTime $datePaiment): static
-    {
-        $this->datePaiment = $datePaiment;
-
-        return $this;
-    }
-
-    public function getStatut(): ?string
-    {
-        return $this->statut;
-    }
-
-    public function setStatut(string $statut): static
-    {
-        $this->statut = $statut;
-
-        return $this;
-    }
-
-    public function getNumeroMoi(): ?int
-    {
-        return $this->numeroMoi;
-    }
-
-    public function setNumeroMoi(int $numeroMoi): static
-    {
-        $this->numeroMoi = $numeroMoi;
-
-        return $this;
-    }
-
-    public function getCreeAu(): ?\DateTime
-    {
-        return $this->creeAu;
-    }
-
-    public function setCreeAu(\DateTime $creeAu): static
-    {
-        $this->creeAu = $creeAu;
-
-        return $this;
-    }
-
-    public function getEditAu(): ?\DateTime
-    {
-        return $this->editAu;
-    }
-
-    public function setEditAu(?\DateTime $editAu): static
-    {
-        $this->editAu = $editAu;
-
-        return $this;
-    }
-
-    public function getDepense(): ?Depense
-    {
-        return $this->depense;
-    }
-
-    public function setDepense(Depense $depense): static
-    {
-        $this->depense = $depense;
-
-        return $this;
-    }
-
-    /**
-     * @return Collection<int, Utilisateur>
-     */
-    public function getCreePar(): Collection
-    {
-        return $this->creePar;
-    }
-
-    public function addCreePar(Utilisateur $creePar): static
-    {
-        if (!$this->creePar->contains($creePar)) {
-            $this->creePar->add($creePar);
-        }
-
-        return $this;
-    }
-
-    public function removeCreePar(Utilisateur $creePar): static
-    {
-        $this->creePar->removeElement($creePar);
-
-        return $this;
-    }
+    public function getId(): ?int { return $this->id; }
+    public function getDepense(): ?Depense { return $this->depense; }
+    public function setDepense(?Depense $depense): static { $this->depense = $depense; return $this; }
+    public function getDateDebut(): ?\DateTimeImmutable { return $this->dateDebut; }
+    public function setDateDebut(\DateTimeImmutable $dateDebut): static { $this->dateDebut = $dateDebut; return $this; }
+    public function getDateFin(): ?\DateTimeImmutable { return $this->dateFin; }
+    public function setDateFin(\DateTimeImmutable $dateFin): static { $this->dateFin = $dateFin; return $this; }
+    public function getNumeroContrat(): ?string { return $this->numeroContrat; }
+    public function setNumeroContrat(?string $numeroContrat): static { $this->numeroContrat = $numeroContrat; return $this; }
+    public function getCreePar(): ?Utilisateur { return $this->creePar; }
+    public function setCreePar(?Utilisateur $creePar): static { $this->creePar = $creePar; return $this; }
+    public function getCreeAu(): ?\DateTimeImmutable { return $this->creeAu; }
+    public function setCreeAu(?\DateTimeImmutable $creeAu): static { $this->creeAu = $creeAu; return $this; }
+    public function getEditAu(): ?\DateTimeImmutable { return $this->editAu; }
+    public function setEditAu(?\DateTimeImmutable $editAu): static { $this->editAu = $editAu; return $this; }
 }

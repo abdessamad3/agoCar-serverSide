@@ -50,9 +50,9 @@ class SuiviTechniqueController extends AbstractController
         $data = json_decode($request->getContent(), true);
 
         $suivi = new SuiviTechnique();
-        $suivi->setDateReglages(new \DateTime($data['dateReglages']));
-        $suivi->setDateFin(new \DateTime($data['dateFin']));
-        $suivi->setCreeAu(new \DateTime());
+        $suivi->setDateReglages(new \DateTimeImmutable($data['dateReglages']));
+        $suivi->setDateFin(new \DateTimeImmutable($data['dateFin']));
+        $suivi->setCreeAu(new \DateTimeImmutable());
         $suivi->setCreePar($this->getUser());
 
         if (isset($data['voitureId'])) {
@@ -71,9 +71,9 @@ class SuiviTechniqueController extends AbstractController
     {
         $data = json_decode($request->getContent(), true);
 
-        if (isset($data['dateReglages'])) $suivi->setDateReglages(new \DateTime($data['dateReglages']));
-        if (isset($data['dateFin']))      $suivi->setDateFin(new \DateTime($data['dateFin']));
-        $suivi->setEditAu(new \DateTime());
+        if (isset($data['dateReglages'])) $suivi->setDateReglages(new \DateTimeImmutable($data['dateReglages']));
+        if (isset($data['dateFin']))      $suivi->setDateFin(new \DateTimeImmutable($data['dateFin']));
+        $suivi->setEditAu(new \DateTimeImmutable());
 
         $em->flush();
 
