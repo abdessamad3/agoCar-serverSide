@@ -13,31 +13,28 @@ use Symfony\Component\Routing\Annotation\Route;
 #[Route('/api/accessoire', name: 'app_api_accessoire_')]
 class AccessoireController extends AbstractController
 {
+    private function serialize(Accessoire $a): array
+    {
+        return [
+            'id'          => $a->getId(),
+            'nom'         => $a->getNom(),
+            'prix'        => $a->getPrix(),
+            'prixJour'    => $a->getPrix(),
+            'description' => $a->getDescription(),
+            'creeAu'      => $a->getCreeAu()?->format('Y-m-d'),
+        ];
+    }
+
     #[Route('', name: 'list', methods: ['GET'])]
     public function list(AccessoireRepository $repo): JsonResponse
     {
-        $data = array_map(fn($a) => [
-            'id'           => $a->getId(),
-            'nom'          => $a->getNom(),
-            'prix'         => $a->getPrix(),
-            'typePaiement' => $a->getTypePaiement(),
-            'creePar'      => $a->getCreePar()?->getId(),
-            'creeAu'       => $a->getCreeAu()?->format('Y-m-d H:i:s'),
-        ], $repo->findAll());
-
-        return $this->json($data);
+        return $this->json(array_map(fn($a) => $this->serialize($a), $repo->findAll()));
     }
 
     #[Route('/{id}', name: 'show', methods: ['GET'])]
     public function show(Accessoire $accessoire): JsonResponse
     {
-        return $this->json([
-            'id'           => $accessoire->getId(),
-            'nom'          => $accessoire->getNom(),
-            'prix'         => $accessoire->getPrix(),
-            'typePaiement' => $accessoire->getTypePaiement(),
-            'creePar'      => $accessoire->getCreePar()?->getId(),
-        ]);
+        return $this->json($this->serialize($accessoire));
     }
 
     #[Route('', name: 'create', methods: ['POST'])]
@@ -47,10 +44,9 @@ class AccessoireController extends AbstractController
 
         $accessoire = new Accessoire();
         $accessoire->setNom($data['nom']);
-        $accessoire->setPrix($data['prix']);
-        $accessoire->setTypePaiement($data['typePaiement'] ?? null);
+        $accessoire->setPrix($data['prixJour'] ?? $data['prix'] ?? '0');
+        if (isset($data['description'])) $accessoire->setDescription($data['description']);
         $accessoire->setCreeAu(new \DateTimeImmutable());
-        $accessoire->setCreePar($this->getUser());
 
         $em->persist($accessoire);
         $em->flush();
@@ -63,10 +59,9 @@ class AccessoireController extends AbstractController
     {
         $data = json_decode($request->getContent(), true);
 
-        if (isset($data['nom']))          $accessoire->setNom($data['nom']);
-        if (isset($data['prix']))         $accessoire->setPrix($data['prix']);
-        if (isset($data['typePaiement'])) $accessoire->setTypePaiement($data['typePaiement']);
-        $accessoire->setEditAu(new \DateTimeImmutable());
+        if (isset($data['nom']))                          $accessoire->setNom($data['nom']);
+        if (isset($data['prixJour']) || isset($data['prix'])) $accessoire->setPrix($data['prixJour'] ?? $data['prix']);
+        if (isset($data['description']))                  $accessoire->setDescription($data['description']);
 
         $em->flush();
 

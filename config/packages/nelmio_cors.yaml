@@ -1,12 +1,16 @@
 nelmio_cors:
     defaults:
         origin_regex: true
-        allow_origin: ['http://localhost:4200']
+        allow_origin: ['^https?://(localhost|127\.0\.0\.1)(:[0-9]+)?$']
         allow_methods: ['GET', 'OPTIONS', 'POST', 'PUT', 'PATCH', 'DELETE']
         allow_headers: ['Content-Type', 'Authorization']
-        allow_credentials: true
+        allow_credentials: false
         max_age: 3600
     paths:
-        ^/api/':
-            allow_origin: ['https://localhost:4200']
-
+        '^/':
+            origin_regex: true
+            allow_origin: ['^https?://(localhost|127\.0\.0\.1)(:[0-9]+)?$']
+            allow_methods: ['GET', 'OPTIONS', 'POST', 'PUT', 'PATCH', 'DELETE']
+            allow_headers: ['Content-Type', 'Authorization']
+            allow_credentials: false
+            max_age: 3600

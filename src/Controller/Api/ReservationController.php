@@ -20,17 +20,16 @@ class ReservationController extends AbstractController
     {
         $reservations = $repo->findAll();
         $data = array_map(fn($r) => [
-            'id'             => $r->getId(),
-            'client'         => ['id' => $r->getClient()?->getId(), 'nom' => $r->getClient()?->getNom()],
-            'voiture'        => ['id' => $r->getVoiture()?->getId(), 'marque' => $r->getVoiture()?->getMarque(), 'modele' => $r->getVoiture()?->getModele()],
-            'dateDebut'      => $r->getDateDebut()?->format('Y-m-d'),
-            'dateFin'        => $r->getDateFin()?->format('Y-m-d'),
-            'total'          => $r->getTotal(),
-            'montantPaye'    => $r->getMontantPaye(),
-            'montantRestant' => $r->getMontantRestant(),
-            'lavage'         => $r->isLavage(),
-            'creeAu'         => $r->getCreeAu()?->format('Y-m-d H:i:s'),
-            'creePar'        => $r->getCreePar()?->getId(),
+            'id'               => $r->getId(),
+            'client'           => ['id' => $r->getClient()?->getId(), 'nom' => $r->getClient()?->getNom()],
+            'voiture'          => ['id' => $r->getVoiture()?->getId(), 'marque' => $r->getVoiture()?->getMarque(), 'modele' => $r->getVoiture()?->getModele()],
+            'dateDebut'        => $r->getDateDebut()?->format('Y-m-d'),
+            'dateFin'          => $r->getDateFin()?->format('Y-m-d'),
+            'total'            => $r->getTotal(),
+            'montantPaye'      => $r->getMontantPaye(),
+            'modePaiement'     => $r->getModePaiement(),
+            'reservationStatus'=> $r->getReservationStatus(),
+            'creeAu'           => $r->getCreeAu()?->format('Y-m-d H:i:s'),
         ], $reservations);
 
         return $this->json($data);
@@ -39,20 +38,39 @@ class ReservationController extends AbstractController
     #[Route('/{id}', name: 'show', methods: ['GET'])]
     public function show(Reservation $reservation): JsonResponse
     {
+        $total     = (float) $reservation->getTotal();
+        $dateDebut = $reservation->getDateDebut();
+        $dateFin   = $reservation->getDateFin();
+        $days = ($dateDebut && $dateFin) ? (int) $dateDebut->diff($dateFin)->days : 0;
+
         return $this->json([
-            'id'             => $reservation->getId(),
-            'client'         => ['id' => $reservation->getClient()?->getId(), 'nom' => $reservation->getClient()?->getNom()],
-            'voiture'        => ['id' => $reservation->getVoiture()?->getId(), 'marque' => $reservation->getVoiture()?->getMarque()],
-            'dateDebut'      => $reservation->getDateDebut()?->format('Y-m-d'),
-            'dateFin'        => $reservation->getDateFin()?->format('Y-m-d'),
-            'total'          => $reservation->getTotal(),
-            'montantPaye'    => $reservation->getMontantPaye(),
-            'montantRestant' => $reservation->getMontantRestant(),
-            'lavage'         => $reservation->isLavage(),
-            'description'    => $reservation->getDescription(),
-            'creeAu'         => $reservation->getCreeAu()?->format('Y-m-d H:i:s'),
-            'editAu'         => $reservation->getEditAu()?->format('Y-m-d H:i:s'),
-            'creePar'        => $reservation->getCreePar()?->getId(),
+            'id'                => $reservation->getId(),
+            'client'            => [
+                'id'              => $reservation->getClient()?->getId(),
+                'nom'             => $reservation->getClient()?->getNom(),
+                'telephone'       => $reservation->getClient()?->getTelephone(),
+                'cin'             => $reservation->getClient()?->getCin(),
+                'permisConduite'  => $reservation->getClient()?->getPermisConduite(),
+            ],
+            'voiture'           => [
+                'id'     => $reservation->getVoiture()?->getId(),
+                'marque' => $reservation->getVoiture()?->getMarque(),
+                'modele' => $reservation->getVoiture()?->getModele(),
+                'annee'  => $reservation->getVoiture()?->getAnnee(),
+                'image'  => $reservation->getVoiture()?->getImagePath(),
+            ],
+            'dateDebut'         => $dateDebut?->format('Y-m-d H:i:s'),
+            'dateFin'           => $dateFin?->format('Y-m-d H:i:s'),
+            'nbJours'           => $days,
+            'prixJour'          => (float) $reservation->getVoiture()?->getPrixJour(),
+            'total'             => $total,
+            'montantPaye'       => (float) $reservation->getMontantPaye(),
+            'montantRestant'    => $total - (float) $reservation->getMontantPaye(),
+            'modePaiement'      => $reservation->getModePaiement(),
+            'reservationStatus' => $reservation->getReservationStatus(),
+            'accessoires'       => $reservation->getAccessoires()->map(fn($a) => ['id' => $a->getId(), 'nom' => $a->getNom()])->toArray(),
+            'creeAu'            => $reservation->getCreeAu()?->format('Y-m-d H:i:s'),
+            'editAu'            => $reservation->getEditAu()?->format('Y-m-d H:i:s'),
         ]);
     }
 
@@ -79,12 +97,10 @@ class ReservationController extends AbstractController
         $reservation->setDateDebut(new \DateTimeImmutable($data['dateDebut']));
         $reservation->setDateFin(new \DateTimeImmutable($data['dateFin']));
         $reservation->setTotal($data['total']);
-        $reservation->setMontantPaye($data['montantPaye'] ?? 0);
-        $reservation->setMontantRestant($data['montantRestant'] ?? $data['total']);
-        $reservation->setLavage($data['lavage'] ?? false);
-        $reservation->setDescription($data['description'] ?? null);
+        $reservation->setReservationStatus($data['reservationStatus'] ?? 'confirmed');
+        $reservation->setMontantPaye((string) ($data['montantPaye'] ?? 0));
+        $reservation->setModePaiement($data['modePaiement'] ?? null);
         $reservation->setCreeAu(new \DateTimeImmutable());
-        $reservation->setCreePar($this->getUser());
 
         $voiture->setVoitureStatus('rented');
         $voiture->setReservationStatus('confirmed');
@@ -96,17 +112,29 @@ class ReservationController extends AbstractController
     }
 
     #[Route('/{id}', name: 'update', methods: ['PUT'])]
-    public function update(Reservation $reservation, Request $request, EntityManagerInterface $em): JsonResponse
-    {
+    public function update(
+        Reservation $reservation,
+        Request $request,
+        EntityManagerInterface $em,
+        ClientRepository $clientRepo,
+        VoitureRepository $voitureRepo
+    ): JsonResponse {
         $data = json_decode($request->getContent(), true);
 
-        if (isset($data['dateDebut']))      $reservation->setDateDebut(new \DateTimeImmutable($data['dateDebut']));
-        if (isset($data['dateFin']))        $reservation->setDateFin(new \DateTimeImmutable($data['dateFin']));
-        if (isset($data['total']))          $reservation->setTotal($data['total']);
-        if (isset($data['montantPaye']))    $reservation->setMontantPaye($data['montantPaye']);
-        if (isset($data['montantRestant'])) $reservation->setMontantRestant($data['montantRestant']);
-        if (isset($data['lavage']))         $reservation->setLavage($data['lavage']);
-        if (isset($data['description']))    $reservation->setDescription($data['description']);
+        if (isset($data['clientId'])) {
+            $client = $clientRepo->find($data['clientId']);
+            if ($client) $reservation->setClient($client);
+        }
+        if (isset($data['voitureId'])) {
+            $voiture = $voitureRepo->find($data['voitureId']);
+            if ($voiture) $reservation->setVoiture($voiture);
+        }
+        if (isset($data['dateDebut']))         $reservation->setDateDebut(new \DateTimeImmutable($data['dateDebut']));
+        if (isset($data['dateFin']))           $reservation->setDateFin(new \DateTimeImmutable($data['dateFin']));
+        if (isset($data['total']))             $reservation->setTotal($data['total']);
+        if (isset($data['reservationStatus'])) $reservation->setReservationStatus($data['reservationStatus']);
+        if (isset($data['montantPaye']))        $reservation->setMontantPaye((string) $data['montantPaye']);
+        if (isset($data['modePaiement']))       $reservation->setModePaiement($data['modePaiement']);
         $reservation->setEditAu(new \DateTimeImmutable());
 
         $em->flush();

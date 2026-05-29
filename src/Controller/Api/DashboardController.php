@@ -4,54 +4,64 @@ namespace App\Controller\Api;
 
 use App\Repository\VoitureRepository;
 use App\Repository\ReservationRepository;
-use App\Repository\PaiementRepository;
+use App\Repository\ClientRepository;
+use App\Repository\DepenseRepository;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\Routing\Annotation\Route;
+use Symfony\Component\Security\Http\Attribute\IsGranted;
 
+#[IsGranted('ROLE_USER')]
 #[Route('/api/dashboard', name: 'app_api_dashboard_')]
 class DashboardController extends AbstractController
 {
     public function __construct(
         private VoitureRepository $voitureRepo,
         private ReservationRepository $reservationRepo,
-        private PaiementRepository $paiementRepo,
+        private ClientRepository $clientRepo,
+        private DepenseRepository $depenseRepo,
         private EntityManagerInterface $em
     ) {}
 
     #[Route('/stats', name: 'stats', methods: ['GET'])]
     public function getStats(): JsonResponse
     {
-        // 1. Total Voitures
-        $totalVoitures = $this->voitureRepo->count([]);
-
-        // 2. Available Voitures (voitureStatus = 'available')
-        $availableVoitures = $this->voitureRepo->count(['voitureStatus' => 'available']);
-
-        // 3. Active Reservations (happening NOW)
-        $qbActive = $this->reservationRepo->createQueryBuilder('r');
         $now = new \DateTime();
-        $activeReservations = (int) $qbActive
-            ->select('COUNT(r.id)')
-            ->where('r.dateDebut <= :now')
-            ->andWhere('r.dateFin >= :now')
-            ->setParameter('now', $now)
-            ->getQuery()
-            ->getSingleScalarResult();
 
-        // 4. Total Revenue (Sum of all paiements)
-        $qbRevenue = $this->paiementRepo->createQueryBuilder('p');
-        $revenue = $qbRevenue
-            ->select('SUM(p.montant)')
-            ->getQuery()
-            ->getSingleScalarResult() ?? 0;
+        $totalVoitures    = $this->voitureRepo->count([]);
+        $availableVoitures = $this->voitureRepo->count(['voitureStatus' => 'available']);
+        $totalClients     = $this->clientRepo->count([]);
+
+        $activeReservations = (int) $this->reservationRepo->createQueryBuilder('r')
+            ->select('COUNT(r.id)')
+            ->where('r.dateDebut <= :now')->andWhere('r.dateFin >= :now')
+            ->setParameter('now', $now)
+            ->getQuery()->getSingleScalarResult();
+
+        // Revenue = sum of all reservation totals
+        $revenue = (float) ($this->reservationRepo->createQueryBuilder('r')
+            ->select('SUM(r.total)')
+            ->getQuery()->getSingleScalarResult() ?? 0);
+
+        // Expenses = sum of all depenses
+        $expenses = (float) ($this->depenseRepo->createQueryBuilder('d')
+            ->select('SUM(d.montant)')
+            ->getQuery()->getSingleScalarResult() ?? 0);
+
+        $utilizationRate = $totalVoitures > 0
+            ? round((($totalVoitures - $availableVoitures) / $totalVoitures) * 100, 1)
+            : 0;
 
         return $this->json([
-            'totalVoitures' => $totalVoitures,
-            'availableVoitures' => $availableVoitures,
+            'totalVoitures'      => $totalVoitures,
+            'availableVoitures'  => $availableVoitures,
             'activeReservations' => $activeReservations,
-            'revenue' => (float) $revenue
+            'totalClients'       => $totalClients,
+            'revenue'            => $revenue,
+            'expenses'           => $expenses,
+            'netProfit'          => $revenue - $expenses,
+            'utilizationRate'    => $utilizationRate,
         ]);
     }
 
@@ -118,51 +128,55 @@ class DashboardController extends AbstractController
         ]);
     }
 
-   #[Route('/revenue-summary', name: 'revenue_summary', methods: ['GET'])]
-public function getRevenueSummary(): JsonResponse
-{
-    // Total revenue
-    $qbTotal = $this->paiementRepo->createQueryBuilder('p');
-    $totalRevenue = (float) ($qbTotal
-        ->select('SUM(p.montant)')
-        ->getQuery()
-        ->getSingleScalarResult() ?? 0);
+    #[Route('/revenue-summary', name: 'revenue_summary', methods: ['GET'])]
+    public function getRevenueSummary(): JsonResponse
+    {
+        $startOfMonth = (new \DateTime('first day of this month'))->setTime(0, 0, 0);
+        $endOfMonth   = (new \DateTime('last day of this month'))->setTime(23, 59, 59);
+        $startOfYear  = new \DateTime('first day of January this year');
+        $endOfYear    = new \DateTime('last day of December this year');
 
-    // Revenue this month
-    $now = new \DateTime();
-    $startOfMonth = (new \DateTime())->modify('first day of this month');
-    $endOfMonth = (new \DateTime())->modify('last day of this month');
+        $totalRevenue = (float) ($this->reservationRepo->createQueryBuilder('r')
+            ->select('SUM(r.total)')->getQuery()->getSingleScalarResult() ?? 0);
 
-    $qbMonth = $this->paiementRepo->createQueryBuilder('p');
-    $monthRevenue = (float) ($qbMonth
-        ->select('SUM(p.montant)')
-        ->where('p.datePaiement >= :startMonth')
-        ->andWhere('p.datePaiement <= :endMonth')
-        ->setParameter('startMonth', $startOfMonth)
-        ->setParameter('endMonth', $endOfMonth)
-        ->getQuery()
-        ->getSingleScalarResult() ?? 0);
+        $monthRevenue = (float) ($this->reservationRepo->createQueryBuilder('r')
+            ->select('SUM(r.total)')
+            ->where('r.creeAu >= :start')->andWhere('r.creeAu <= :end')
+            ->setParameter('start', $startOfMonth)->setParameter('end', $endOfMonth)
+            ->getQuery()->getSingleScalarResult() ?? 0);
 
-    // Revenue this year
-    $startOfYear = (new \DateTime('first day of January'));
-    $endOfYear = (new \DateTime('last day of December'));
+        $yearRevenue = (float) ($this->reservationRepo->createQueryBuilder('r')
+            ->select('SUM(r.total)')
+            ->where('r.creeAu >= :start')->andWhere('r.creeAu <= :end')
+            ->setParameter('start', $startOfYear)->setParameter('end', $endOfYear)
+            ->getQuery()->getSingleScalarResult() ?? 0);
 
-    $qbYear = $this->paiementRepo->createQueryBuilder('p');
-    $yearRevenue = (float) ($qbYear
-        ->select('SUM(p.montant)')
-        ->where('p.datePaiement >= :startYear')
-        ->andWhere('p.datePaiement <= :endYear')
-        ->setParameter('startYear', $startOfYear)
-        ->setParameter('endYear', $endOfYear)
-        ->getQuery()
-        ->getSingleScalarResult() ?? 0);
+        $totalExpenses = (float) ($this->depenseRepo->createQueryBuilder('d')
+            ->select('SUM(d.montant)')->getQuery()->getSingleScalarResult() ?? 0);
 
-    return $this->json([
-        'totalRevenue' => $totalRevenue,
-        'monthRevenue' => $monthRevenue,
-        'yearRevenue' => $yearRevenue
-    ]);
-}
+        $monthExpenses = (float) ($this->depenseRepo->createQueryBuilder('d')
+            ->select('SUM(d.montant)')
+            ->where('d.creeAu >= :start')->andWhere('d.creeAu <= :end')
+            ->setParameter('start', $startOfMonth)->setParameter('end', $endOfMonth)
+            ->getQuery()->getSingleScalarResult() ?? 0);
+
+        $monthReservations = (int) ($this->reservationRepo->createQueryBuilder('r')
+            ->select('COUNT(r.id)')
+            ->where('r.creeAu >= :start')->andWhere('r.creeAu <= :end')
+            ->setParameter('start', $startOfMonth)->setParameter('end', $endOfMonth)
+            ->getQuery()->getSingleScalarResult() ?? 0);
+
+        return $this->json([
+            'totalRevenue'       => $totalRevenue,
+            'monthRevenue'       => $monthRevenue,
+            'yearRevenue'        => $yearRevenue,
+            'totalExpenses'      => $totalExpenses,
+            'monthExpenses'      => $monthExpenses,
+            'monthNetProfit'     => $monthRevenue - $monthExpenses,
+            'totalNetProfit'     => $totalRevenue - $totalExpenses,
+            'monthReservations'  => $monthReservations,
+        ]);
+    }
     #[Route('/recent-reservations', name: 'recent_reservations', methods: ['GET'])]
     public function getRecentReservations(): JsonResponse
     {
@@ -174,16 +188,33 @@ public function getRevenueSummary(): JsonResponse
             ->getQuery()
             ->getResult();
 
-        $data = array_map(fn($r) => [
-            'id' => $r->getId(),
-            'client' => $r->getClient()?->getNom(),
-            'voiture' => $r->getVoiture()?->getMarque() . ' ' . $r->getVoiture()?->getModele(),
-            'dateDebut' => $r->getDateDebut()?->format('Y-m-d'),
-            'dateFin' => $r->getDateFin()?->format('Y-m-d'),
-            'total' => $r->getTotal(),
-            'montantPaye' => $r->getMontantPaye(),
-            'creeAu' => $r->getCreeAu()?->format('Y-m-d H:i:s'),
-        ], $reservations);
+        $data = array_map(function ($r) {
+            $total = (float) $r->getTotal();
+            $dateDebut = $r->getDateDebut();
+            $dateFin   = $r->getDateFin();
+            $days = ($dateDebut && $dateFin)
+                ? (int) $dateDebut->diff($dateFin)->days
+                : 0;
+            return [
+                'id'                => $r->getId(),
+                'client'            => ['id' => $r->getClient()?->getId(), 'nom' => $r->getClient()?->getNom()],
+                'voiture'           => [
+                    'id'     => $r->getVoiture()?->getId(),
+                    'marque' => $r->getVoiture()?->getMarque(),
+                    'modele' => $r->getVoiture()?->getModele(),
+                    'image'  => $r->getVoiture()?->getImagePath(),
+                ],
+                'dateDebut'         => $dateDebut?->format('Y-m-d H:i:s'),
+                'dateFin'           => $dateFin?->format('Y-m-d H:i:s'),
+                'nbJours'           => $days,
+                'prixJour'          => (float) $r->getVoiture()?->getPrixJour(),
+                'total'             => $total,
+                'montantPaye'       => (float) $r->getMontantPaye(),
+                'montantRestant'    => $total - (float) $r->getMontantPaye(),
+                'reservationStatus' => $r->getReservationStatus(),
+                'creeAu'            => $r->getCreeAu()?->format('Y-m-d H:i:s'),
+            ];
+        }, $reservations);
 
         return $this->json([
             'data' => $data,

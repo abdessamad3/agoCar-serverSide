@@ -64,6 +64,24 @@ class VoitureRepository extends ServiceEntityRepository
     }
 
     /**
+     * Return IDs of voitures that have an overlapping reservation in the given period
+     */
+    public function findBookedVoitureIdsForPeriod(\DateTimeInterface $dateDebut, \DateTimeInterface $dateFin): array
+    {
+        $qb = $this->getEntityManager()->createQueryBuilder();
+        $qb->select('IDENTITY(r.voiture) as voiture_id')
+           ->from(\App\Entity\Reservation::class, 'r')
+           ->where('r.dateDebut <= :dateFin')
+           ->andWhere('r.dateFin >= :dateDebut')
+           ->andWhere('r.reservationStatus != :cancelled')
+           ->setParameter('dateDebut', $dateDebut)
+           ->setParameter('dateFin', $dateFin)
+           ->setParameter('cancelled', 'cancelled');
+
+        return array_column($qb->getQuery()->getScalarResult(), 'voiture_id');
+    }
+
+    /**
      * Count total voitures with filters applied
      */
     public function countWithFilters(array $filters = []): int

@@ -26,6 +26,14 @@ class AuthController extends AbstractController
             return $this->json(['error' => 'Email and password required'], 400);
         }
 
+        if (!filter_var($data['email'], FILTER_VALIDATE_EMAIL)) {
+            return $this->json(['error' => 'Invalid email format'], 400);
+        }
+
+        if (strlen($data['password']) < 8) {
+            return $this->json(['error' => 'Password must be at least 8 characters'], 400);
+        }
+
         $existing = $em->getRepository(Utilisateur::class)->findOneBy(['email' => $data['email']]);
         if ($existing) {
             return $this->json(['error' => 'User already exists'], 409);
@@ -34,6 +42,8 @@ class AuthController extends AbstractController
         $user = new Utilisateur();
         $user->setEmail($data['email']);
         $user->setPassword($hasher->hashPassword($user, $data['password']));
+        $user->setNom($data['nom'] ?? '');
+        $user->setPrenom($data['prenom'] ?? '');
         $user->setRoles(['ROLE_USER']);
         $user->setCreeAu(new \DateTimeImmutable());
 
@@ -86,9 +96,11 @@ class AuthController extends AbstractController
         }
 
         return $this->json([
-            'id' => $user->getId(),
-            'email' => $user->getEmail(),
-            'roles' => $user->getRoles(),
+            'id'     => $user->getId(),
+            'email'  => $user->getEmail(),
+            'nom'    => $user->getNom(),
+            'prenom' => $user->getPrenom(),
+            'roles'  => $user->getRoles(),
             'bureau' => $user->getBureau()?->getId(),
             'creeAu' => $user->getCreeAu()?->format('Y-m-d H:i:s')
         ]);

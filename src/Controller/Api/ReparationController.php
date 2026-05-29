@@ -14,29 +14,35 @@ use Symfony\Component\Routing\Annotation\Route;
 #[Route('/api/reparation', name: 'app_api_reparation_')]
 class ReparationController extends AbstractController
 {
+    private function serialize(Reparation $r): array
+    {
+        $dep = $r->getDepense();
+        $voit = $dep?->getVoiture();
+        return [
+            'id'                   => $r->getId(),
+            'descriptionTechnique' => $r->getDescriptionTechnique(),
+            'depenseId'            => $dep?->getId(),
+            'voitureId'            => $voit?->getId(),
+            'voiture'              => trim(($voit?->getMarque() ?? '') . ' ' . ($voit?->getModele() ?? '')),
+            'montant'              => $dep?->getMontant(),
+            'date'                 => $dep?->getDate()?->format('Y-m-d'),
+            'dateDebut'            => $r->getDateDebut()?->format('Y-m-d'),
+            'dateFin'              => $r->getDateFin()?->format('Y-m-d'),
+            'statut'               => $dep?->getStatut()?->value,
+            'creeAu'               => $r->getCreeAu()?->format('Y-m-d'),
+        ];
+    }
+
     #[Route('', name: 'list', methods: ['GET'])]
     public function list(ReparationRepository $repo): JsonResponse
     {
-        $data = array_map(fn($r) => [
-            'id'                    => $r->getId(),
-            'descriptionTechnique'  => $r->getDescriptionTechnique(),
-            'depense'               => $r->getDepense()?->getId(),
-            'creePar'               => $r->getCreePar()?->getId(),
-            'creeAu'                => $r->getCreeAu()?->format('Y-m-d H:i:s'),
-        ], $repo->findAll());
-
-        return $this->json($data);
+        return $this->json(array_map(fn($r) => $this->serialize($r), $repo->findAll()));
     }
 
     #[Route('/{id}', name: 'show', methods: ['GET'])]
     public function show(Reparation $reparation): JsonResponse
     {
-        return $this->json([
-            'id'                   => $reparation->getId(),
-            'descriptionTechnique' => $reparation->getDescriptionTechnique(),
-            'depense'              => $reparation->getDepense()?->getId(),
-            'creePar'              => $reparation->getCreePar()?->getId(),
-        ]);
+        return $this->json($this->serialize($reparation));
     }
 
     #[Route('', name: 'create', methods: ['POST'])]
@@ -49,6 +55,8 @@ class ReparationController extends AbstractController
 
         $reparation = new Reparation();
         $reparation->setDescriptionTechnique($data['descriptionTechnique']);
+        if (!empty($data['dateDebut'])) $reparation->setDateDebut(new \DateTimeImmutable($data['dateDebut']));
+        if (!empty($data['dateFin']))   $reparation->setDateFin(new \DateTimeImmutable($data['dateFin']));
         $reparation->setCreeAu(new \DateTimeImmutable());
         $reparation->setCreePar($this->getUser());
 
@@ -69,6 +77,8 @@ class ReparationController extends AbstractController
         $data = json_decode($request->getContent(), true);
 
         if (isset($data['descriptionTechnique'])) $reparation->setDescriptionTechnique($data['descriptionTechnique']);
+        if (isset($data['dateDebut'])) $reparation->setDateDebut($data['dateDebut'] ? new \DateTimeImmutable($data['dateDebut']) : null);
+        if (isset($data['dateFin']))   $reparation->setDateFin($data['dateFin'] ? new \DateTimeImmutable($data['dateFin']) : null);
         $reparation->setEditAu(new \DateTimeImmutable());
 
         $em->flush();

@@ -14,29 +14,33 @@ use Symfony\Component\Routing\Annotation\Route;
 #[Route('/api/adblue', name: 'app_api_adblue_')]
 class AdblueController extends AbstractController
 {
+    private function serialize(Adblue $a): array
+    {
+        $dep  = $a->getDepense();
+        $voit = $dep?->getVoiture();
+        return [
+            'id'            => $a->getId(),
+            'quantiteLitre' => $a->getQuantiteLitre(),
+            'quantiteLitres'=> $a->getQuantiteLitre(),
+            'depenseId'     => $dep?->getId(),
+            'voitureId'     => $voit?->getId(),
+            'voiture'       => trim(($voit?->getMarque() ?? '') . ' ' . ($voit?->getModele() ?? '')),
+            'date'          => $dep?->getDate()?->format('Y-m-d'),
+            'cout'          => $dep?->getMontant(),
+            'creeAu'        => $a->getCreeAu()?->format('Y-m-d'),
+        ];
+    }
+
     #[Route('', name: 'list', methods: ['GET'])]
     public function list(AdblueRepository $repo): JsonResponse
     {
-        $data = array_map(fn($a) => [
-            'id'             => $a->getId(),
-            'quantiteLitre'  => $a->getQuantiteLitre(),
-            'depense'        => $a->getDepense()?->getId(),
-            'creePar'        => $a->getCreePar()?->getId(),
-            'creeAu'         => $a->getCreeAu()?->format('Y-m-d H:i:s'),
-        ], $repo->findAll());
-
-        return $this->json($data);
+        return $this->json(array_map(fn($a) => $this->serialize($a), $repo->findAll()));
     }
 
     #[Route('/{id}', name: 'show', methods: ['GET'])]
     public function show(Adblue $adblue): JsonResponse
     {
-        return $this->json([
-            'id'            => $adblue->getId(),
-            'quantiteLitre' => $adblue->getQuantiteLitre(),
-            'depense'       => $adblue->getDepense()?->getId(),
-            'creePar'       => $adblue->getCreePar()?->getId(),
-        ]);
+        return $this->json($this->serialize($adblue));
     }
 
     #[Route('', name: 'create', methods: ['POST'])]

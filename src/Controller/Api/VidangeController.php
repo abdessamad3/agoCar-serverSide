@@ -14,35 +14,36 @@ use Symfony\Component\Routing\Annotation\Route;
 #[Route('/api/vidange', name: 'app_api_vidange_')]
 class VidangeController extends AbstractController
 {
-    #[Route('', name: 'list', methods: ['GET'])]
-    public function list(VidangeRepository $repo): JsonResponse
+    private function serialize(Vidange $v): array
     {
-        $data = array_map(fn($v) => [
+        $dep  = $v->getDepense();
+        $voit = $dep?->getVoiture();
+        return [
             'id'                 => $v->getId(),
             'kilometrageSuivant' => $v->getKilometrageSuivant(),
+            'kilometrage'        => $v->getKilometrageSuivant(),
             'filtreAir'          => $v->isFiltreAir(),
             'filtreHuile'        => $v->isFiltreHuile(),
             'filtreCarburant'    => $v->isFiltreCarburant(),
-            'depense'            => $v->getDepense()?->getId(),
-            'creePar'            => $v->getCreePar()?->getId(),
-            'creeAu'             => $v->getCreeAu()?->format('Y-m-d H:i:s'),
-        ], $repo->findAll());
+            'depenseId'          => $dep?->getId(),
+            'voitureId'          => $voit?->getId(),
+            'voiture'            => trim(($voit?->getMarque() ?? '') . ' ' . ($voit?->getModele() ?? '')),
+            'date'               => $dep?->getDate()?->format('Y-m-d'),
+            'cout'               => $dep?->getMontant(),
+            'creeAu'             => $v->getCreeAu()?->format('Y-m-d'),
+        ];
+    }
 
-        return $this->json($data);
+    #[Route('', name: 'list', methods: ['GET'])]
+    public function list(VidangeRepository $repo): JsonResponse
+    {
+        return $this->json(array_map(fn($v) => $this->serialize($v), $repo->findAll()));
     }
 
     #[Route('/{id}', name: 'show', methods: ['GET'])]
     public function show(Vidange $vidange): JsonResponse
     {
-        return $this->json([
-            'id'                 => $vidange->getId(),
-            'kilometrageSuivant' => $vidange->getKilometrageSuivant(),
-            'filtreAir'          => $vidange->isFiltreAir(),
-            'filtreHuile'        => $vidange->isFiltreHuile(),
-            'filtreCarburant'    => $vidange->isFiltreCarburant(),
-            'depense'            => $vidange->getDepense()?->getId(),
-            'creePar'            => $vidange->getCreePar()?->getId(),
-        ]);
+        return $this->json($this->serialize($vidange));
     }
 
     #[Route('', name: 'create', methods: ['POST'])]

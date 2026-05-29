@@ -16,6 +16,9 @@ class Bureau
     #[ORM\Column(length: 100)]
     private ?string $nom = null;
 
+    #[ORM\Column(length: 255, nullable: true)]
+    private ?string $adresse = null;
+
     #[ORM\Column(length: 50)]
     private ?string $statut = null;
 
@@ -30,14 +33,22 @@ class Bureau
     private ?\DateTimeImmutable $editAu = null;
 
     public function getId(): ?int { return $this->id; }
+    
     public function getNom(): ?string { return $this->nom; }
     public function setNom(string $nom): static { $this->nom = $nom; return $this; }
+    
+    public function getAdresse(): ?string { return $this->adresse; }
+    public function setAdresse(?string $adresse): static { $this->adresse = $adresse; return $this; }
+    
     public function getStatut(): ?string { return $this->statut; }
     public function setStatut(string $statut): static { $this->statut = $statut; return $this; }
+    
     public function getCreePar(): ?Utilisateur { return $this->creePar; }
     public function setCreePar(?Utilisateur $creePar): static { $this->creePar = $creePar; return $this; }
+    
     public function getCreeAu(): ?\DateTimeImmutable { return $this->creeAu; }
     public function setCreeAu(?\DateTimeImmutable $creeAu): static { $this->creeAu = $creeAu; return $this; }
+    
     public function getEditAu(): ?\DateTimeImmutable { return $this->editAu; }
     public function setEditAu(?\DateTimeImmutable $editAu): static { $this->editAu = $editAu; return $this; }
 }

@@ -14,33 +14,33 @@ use Symfony\Component\Routing\Annotation\Route;
 #[Route('/api/assurance', name: 'app_api_assurance_')]
 class AssuranceController extends AbstractController
 {
-    #[Route('', name: 'list', methods: ['GET'])]
-    public function list(AssuranceRepository $repo): JsonResponse
+    private function serialize(Assurance $a): array
     {
-        $data = array_map(fn($a) => [
+        $dep  = $a->getDepense();
+        $voit = $dep?->getVoiture();
+        return [
             'id'            => $a->getId(),
             'dateDebut'     => $a->getDateDebut()?->format('Y-m-d'),
             'dateFin'       => $a->getDateFin()?->format('Y-m-d'),
             'numeroContrat' => $a->getNumeroContrat(),
-            'depense'       => $a->getDepense()?->getId(),
-            'creePar'       => $a->getCreePar()?->getId(),
-            'creeAu'        => $a->getCreeAu()?->format('Y-m-d H:i:s'),
-        ], $repo->findAll());
+            'depenseId'     => $dep?->getId(),
+            'voitureId'     => $voit?->getId(),
+            'voiture'       => trim(($voit?->getMarque() ?? '') . ' ' . ($voit?->getModele() ?? '')),
+            'montant'       => $dep?->getMontant(),
+            'creeAu'        => $a->getCreeAu()?->format('Y-m-d'),
+        ];
+    }
 
-        return $this->json($data);
+    #[Route('', name: 'list', methods: ['GET'])]
+    public function list(AssuranceRepository $repo): JsonResponse
+    {
+        return $this->json(array_map(fn($a) => $this->serialize($a), $repo->findAll()));
     }
 
     #[Route('/{id}', name: 'show', methods: ['GET'])]
     public function show(Assurance $assurance): JsonResponse
     {
-        return $this->json([
-            'id'            => $assurance->getId(),
-            'dateDebut'     => $assurance->getDateDebut()?->format('Y-m-d'),
-            'dateFin'       => $assurance->getDateFin()?->format('Y-m-d'),
-            'numeroContrat' => $assurance->getNumeroContrat(),
-            'depense'       => $assurance->getDepense()?->getId(),
-            'creePar'       => $assurance->getCreePar()?->getId(),
-        ]);
+        return $this->json($this->serialize($assurance));
     }
 
     #[Route('', name: 'create', methods: ['POST'])]

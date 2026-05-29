@@ -14,10 +14,10 @@ use Symfony\Component\Routing\Annotation\Route;
 #[Route('/api/credit', name: 'app_api_credit_')]
 class CreditController extends AbstractController
 {
-    #[Route('', name: 'list', methods: ['GET'])]
-    public function list(CreditRepository $repo): JsonResponse
+    private function serialize(Credit $c, bool $withPaiements = false): array
     {
-        $data = array_map(fn($c) => [
+        $voit = $c->getVoiture();
+        $data = [
             'id'           => $c->getId(),
             'montantTotal' => $c->getMontantTotal(),
             'mensualite'   => $c->getMensualite(),
@@ -25,34 +25,31 @@ class CreditController extends AbstractController
             'dateFin'      => $c->getDateFin()?->format('Y-m-d'),
             'dureeMois'    => $c->getDureeMois(),
             'statut'       => $c->getStatut(),
-            'voiture'      => $c->getVoiture()?->getId(),
-            'creePar'      => $c->getCreePar()?->getId(),
-            'creeAu'       => $c->getCreeAu()?->format('Y-m-d H:i:s'),
-        ], $repo->findAll());
+            'voitureId'    => $voit?->getId(),
+            'voiture'      => trim(($voit?->getMarque() ?? '') . ' ' . ($voit?->getModele() ?? '')),
+            'creeAu'       => $c->getCreeAu()?->format('Y-m-d'),
+        ];
+        if ($withPaiements) {
+            $data['paiements'] = $c->getPaiements()->map(fn($p) => [
+                'id'           => $p->getId(),
+                'montant'      => $p->getMontant(),
+                'datePaiement' => $p->getDatePaiement()?->format('Y-m-d'),
+                'statut'       => $p->getStatut(),
+            ])->toArray();
+        }
+        return $data;
+    }
 
-        return $this->json($data);
+    #[Route('', name: 'list', methods: ['GET'])]
+    public function list(CreditRepository $repo): JsonResponse
+    {
+        return $this->json(array_map(fn($c) => $this->serialize($c), $repo->findAll()));
     }
 
     #[Route('/{id}', name: 'show', methods: ['GET'])]
     public function show(Credit $credit): JsonResponse
     {
-        return $this->json([
-            'id'           => $credit->getId(),
-            'montantTotal' => $credit->getMontantTotal(),
-            'mensualite'   => $credit->getMensualite(),
-            'dateDebut'    => $credit->getDateDebut()?->format('Y-m-d'),
-            'dateFin'      => $credit->getDateFin()?->format('Y-m-d'),
-            'dureeMois'    => $credit->getDureeMois(),
-            'statut'       => $credit->getStatut(),
-            'voiture'      => $credit->getVoiture()?->getId(),
-            'creePar'      => $credit->getCreePar()?->getId(),
-            'paiements'    => $credit->getPaiements()->map(fn($p) => [
-                'id'           => $p->getId(),
-                'montant'      => $p->getMontant(),
-                'datePaiement' => $p->getDatePaiement()?->format('Y-m-d'),
-                'statut'       => $p->getStatut(),
-            ])->toArray(),
-        ]);
+        return $this->json($this->serialize($credit, true));
     }
 
     #[Route('', name: 'create', methods: ['POST'])]

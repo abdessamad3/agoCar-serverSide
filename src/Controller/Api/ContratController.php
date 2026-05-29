@@ -15,31 +15,36 @@ use Symfony\Component\Routing\Annotation\Route;
 #[Route('/api/contrat', name: 'app_api_contrat_')]
 class ContratController extends AbstractController
 {
+    private function serialize(Contrat $c): array
+    {
+        $res  = $c->getReservation();
+        $voit = $res?->getVoiture();
+        $cli  = $c->getClient();
+        return [
+            'id'           => $c->getId(),
+            'client'       => ['id' => $cli?->getId(), 'nom' => $cli?->getNom()],
+            'clientId'     => $cli?->getId(),
+            'voiture'      => ['id' => $voit?->getId(), 'marque' => $voit?->getMarque(), 'modele' => $voit?->getModele()],
+            'voitureId'    => $voit?->getId(),
+            'voitureLabel' => trim(($voit?->getMarque() ?? '') . ' ' . ($voit?->getModele() ?? '')),
+            'dateDebut'    => $res?->getDateDebut()?->format('Y-m-d'),
+            'dateFin'      => $res?->getDateFin()?->format('Y-m-d'),
+            'montantTotal' => $res?->getTotal(),
+            'reservationId'=> $res?->getId(),
+            'creeAu'       => $c->getCreeAu()?->format('Y-m-d'),
+        ];
+    }
+
     #[Route('', name: 'list', methods: ['GET'])]
     public function list(ContratRepository $repo): JsonResponse
     {
-        $data = array_map(fn($c) => [
-            'id'          => $c->getId(),
-            'client'      => ['id' => $c->getClient()?->getId(), 'nom' => $c->getClient()?->getNom()],
-            'reservation' => $c->getReservation()?->getId(),
-            'creePar'     => $c->getCreePar()?->getId(),
-            'creeAu'      => $c->getCreeAu()?->format('Y-m-d H:i:s'),
-        ], $repo->findAll());
-
-        return $this->json($data);
+        return $this->json(array_map(fn($c) => $this->serialize($c), $repo->findAll()));
     }
 
     #[Route('/{id}', name: 'show', methods: ['GET'])]
     public function show(Contrat $contrat): JsonResponse
     {
-        return $this->json([
-            'id'          => $contrat->getId(),
-            'client'      => ['id' => $contrat->getClient()?->getId(), 'nom' => $contrat->getClient()?->getNom()],
-            'reservation' => $contrat->getReservation()?->getId(),
-            'creePar'     => $contrat->getCreePar()?->getId(),
-            'creeAu'      => $contrat->getCreeAu()?->format('Y-m-d H:i:s'),
-            'editAu'      => $contrat->getEditAu()?->format('Y-m-d H:i:s'),
-        ]);
+        return $this->json($this->serialize($contrat));
     }
 
     #[Route('', name: 'create', methods: ['POST'])]

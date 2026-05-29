@@ -5,6 +5,7 @@ namespace App\Controller\Api;
 use App\Entity\Paiement;
 use App\Repository\PaiementRepository;
 use App\Repository\CreditRepository;
+use App\Repository\ReservationRepository;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -15,16 +16,32 @@ use Symfony\Component\Routing\Annotation\Route;
 class PaiementController extends AbstractController
 {
     #[Route('', name: 'list', methods: ['GET'])]
-    public function list(PaiementRepository $repo): JsonResponse
+    public function list(ReservationRepository $reservationRepo): JsonResponse
     {
-        $data = array_map(fn($p) => [
-            'id'           => $p->getId(),
-            'montant'      => $p->getMontant(),
-            'datePaiement' => $p->getDatePaiement()?->format('Y-m-d'),
-            'statut'       => $p->getStatut(),
-            'credit'       => $p->getCredit()?->getId(),
-            'creePar'      => $p->getCreePar()?->getId(),
-        ], $repo->findAll());
+        $reservations = $reservationRepo->findAll();
+
+        $data = array_map(function ($r) {
+            $total      = (float) $r->getTotal();
+            $montantPaye = (float) $r->getMontantPaye();
+
+            if ($montantPaye >= $total && $total > 0) {
+                $statut = 'paye';
+            } elseif ($montantPaye > 0) {
+                $statut = 'partiel';
+            } else {
+                $statut = 'non_paye';
+            }
+
+            return [
+                'id'           => $r->getId(),
+                'montant'      => $r->getTotal(),
+                'montantPaye'  => $r->getMontantPaye(),
+                'datePaiement' => $r->getCreeAu()?->format('Y-m-d'),
+                'statut'       => $statut,
+                'client'       => ['id' => $r->getClient()?->getId(), 'nom' => $r->getClient()?->getNom()],
+                'voiture'      => ['id' => $r->getVoiture()?->getId(), 'marque' => $r->getVoiture()?->getMarque(), 'modele' => $r->getVoiture()?->getModele()],
+            ];
+        }, $reservations);
 
         return $this->json($data);
     }

@@ -14,31 +14,30 @@ use Symfony\Component\Routing\Annotation\Route;
 #[Route('/api/suivi-technique', name: 'app_api_suivi_technique_')]
 class SuiviTechniqueController extends AbstractController
 {
+    private function serialize(SuiviTechnique $s): array
+    {
+        $voit = $s->getVoiture();
+        return [
+            'id'           => $s->getId(),
+            'dateReglages' => $s->getDateReglages()?->format('Y-m-d'),
+            'date'         => $s->getDateReglages()?->format('Y-m-d'),
+            'dateFin'      => $s->getDateFin()?->format('Y-m-d'),
+            'voitureId'    => $voit?->getId(),
+            'voiture'      => trim(($voit?->getMarque() ?? '') . ' ' . ($voit?->getModele() ?? '')),
+            'creeAu'       => $s->getCreeAu()?->format('Y-m-d'),
+        ];
+    }
+
     #[Route('', name: 'list', methods: ['GET'])]
     public function list(SuiviTechniqueRepository $repo): JsonResponse
     {
-        $data = array_map(fn($s) => [
-            'id'            => $s->getId(),
-            'dateReglages'  => $s->getDateReglages()?->format('Y-m-d'),
-            'dateFin'       => $s->getDateFin()?->format('Y-m-d'),
-            'voiture'       => $s->getVoiture()?->getId(),
-            'creePar'       => $s->getCreePar()?->getId(),
-            'creeAu'        => $s->getCreeAu()?->format('Y-m-d H:i:s'),
-        ], $repo->findAll());
-
-        return $this->json($data);
+        return $this->json(array_map(fn($s) => $this->serialize($s), $repo->findAll()));
     }
 
     #[Route('/{id}', name: 'show', methods: ['GET'])]
     public function show(SuiviTechnique $suivi): JsonResponse
     {
-        return $this->json([
-            'id'           => $suivi->getId(),
-            'dateReglages' => $suivi->getDateReglages()?->format('Y-m-d'),
-            'dateFin'      => $suivi->getDateFin()?->format('Y-m-d'),
-            'voiture'      => $suivi->getVoiture()?->getId(),
-            'creePar'      => $suivi->getCreePar()?->getId(),
-        ]);
+        return $this->json($this->serialize($suivi));
     }
 
     #[Route('', name: 'create', methods: ['POST'])]

@@ -14,31 +14,33 @@ use Symfony\Component\Routing\Annotation\Route;
 #[Route('/api/vignette', name: 'app_api_vignette_')]
 class VignetteController extends AbstractController
 {
+    private function serialize(Vignette $v): array
+    {
+        $dep  = $v->getDepense();
+        $voit = $dep?->getVoiture();
+        return [
+            'id'           => $v->getId(),
+            'annee'        => $v->getAnnee(),
+            'dateLimite'   => $v->getDateLimite()?->format('Y-m-d'),
+            'datePaiement' => $v->getDateLimite()?->format('Y-m-d'),
+            'depenseId'    => $dep?->getId(),
+            'voitureId'    => $voit?->getId(),
+            'voiture'      => trim(($voit?->getMarque() ?? '') . ' ' . ($voit?->getModele() ?? '')),
+            'montant'      => $dep?->getMontant(),
+            'creeAu'       => $v->getCreeAu()?->format('Y-m-d'),
+        ];
+    }
+
     #[Route('', name: 'list', methods: ['GET'])]
     public function list(VignetteRepository $repo): JsonResponse
     {
-        $data = array_map(fn($v) => [
-            'id'         => $v->getId(),
-            'annee'      => $v->getAnnee(),
-            'dateLimite' => $v->getDateLimite()?->format('Y-m-d'),
-            'depense'    => $v->getDepense()?->getId(),
-            'creePar'    => $v->getCreePar()?->getId(),
-            'creeAu'     => $v->getCreeAu()?->format('Y-m-d H:i:s'),
-        ], $repo->findAll());
-
-        return $this->json($data);
+        return $this->json(array_map(fn($v) => $this->serialize($v), $repo->findAll()));
     }
 
     #[Route('/{id}', name: 'show', methods: ['GET'])]
     public function show(Vignette $vignette): JsonResponse
     {
-        return $this->json([
-            'id'         => $vignette->getId(),
-            'annee'      => $vignette->getAnnee(),
-            'dateLimite' => $vignette->getDateLimite()?->format('Y-m-d'),
-            'depense'    => $vignette->getDepense()?->getId(),
-            'creePar'    => $vignette->getCreePar()?->getId(),
-        ]);
+        return $this->json($this->serialize($vignette));
     }
 
     #[Route('', name: 'create', methods: ['POST'])]

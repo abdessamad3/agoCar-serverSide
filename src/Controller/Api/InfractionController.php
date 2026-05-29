@@ -14,39 +14,38 @@ use Symfony\Component\Routing\Annotation\Route;
 #[Route('/api/infraction', name: 'app_api_infraction_')]
 class InfractionController extends AbstractController
 {
-    #[Route('', name: 'list', methods: ['GET'])]
-    public function list(InfractionRepository $repo): JsonResponse
+    private function serialize(Infraction $i): array
     {
-        $data = array_map(fn($i) => [
+        $res  = $i->getReservation();
+        $voit = $res?->getVoiture();
+        return [
             'id'               => $i->getId(),
             'numeroInfraction' => $i->getNumeroInfraction(),
             'type'             => $i->getType(),
+            'description'      => $i->getType(),
             'dateSaisie'       => $i->getDateSaisie()?->format('Y-m-d'),
+            'date'             => $i->getDateSaisie()?->format('Y-m-d'),
             'prix'             => $i->getPrix(),
+            'montant'          => $i->getPrix(),
             'statut'           => $i->getStatut(),
             'datePaiement'     => $i->getDatePaiement()?->format('Y-m-d'),
-            'reservation'      => $i->getReservation()?->getId(),
-            'creePar'          => $i->getCreePar()?->getId(),
-            'creeAu'           => $i->getCreeAu()?->format('Y-m-d H:i:s'),
-        ], $repo->findAll());
+            'reservationId'    => $res?->getId(),
+            'voitureId'        => $voit?->getId(),
+            'voiture'          => trim(($voit?->getMarque() ?? '') . ' ' . ($voit?->getModele() ?? '')),
+            'creeAu'           => $i->getCreeAu()?->format('Y-m-d'),
+        ];
+    }
 
-        return $this->json($data);
+    #[Route('', name: 'list', methods: ['GET'])]
+    public function list(InfractionRepository $repo): JsonResponse
+    {
+        return $this->json(array_map(fn($i) => $this->serialize($i), $repo->findAll()));
     }
 
     #[Route('/{id}', name: 'show', methods: ['GET'])]
     public function show(Infraction $infraction): JsonResponse
     {
-        return $this->json([
-            'id'               => $infraction->getId(),
-            'numeroInfraction' => $infraction->getNumeroInfraction(),
-            'type'             => $infraction->getType(),
-            'dateSaisie'       => $infraction->getDateSaisie()?->format('Y-m-d'),
-            'prix'             => $infraction->getPrix(),
-            'statut'           => $infraction->getStatut(),
-            'datePaiement'     => $infraction->getDatePaiement()?->format('Y-m-d'),
-            'reservation'      => $infraction->getReservation()?->getId(),
-            'creePar'          => $infraction->getCreePar()?->getId(),
-        ]);
+        return $this->json($this->serialize($infraction));
     }
 
     #[Route('', name: 'create', methods: ['POST'])]
@@ -58,10 +57,10 @@ class InfractionController extends AbstractController
         $data = json_decode($request->getContent(), true);
 
         $infraction = new Infraction();
-        $infraction->setNumeroInfraction($data['numeroInfraction']);
-        $infraction->setType($data['type']);
-        $infraction->setDateSaisie(new \DateTimeImmutable($data['dateSaisie']));
-        $infraction->setPrix($data['prix']);
+        $infraction->setNumeroInfraction($data['numeroInfraction'] ?? rand(1000, 9999));
+        $infraction->setType($data['type'] ?? $data['description'] ?? '');
+        $infraction->setDateSaisie(new \DateTimeImmutable($data['dateSaisie'] ?? $data['date'] ?? 'now'));
+        $infraction->setPrix($data['prix'] ?? $data['montant'] ?? '0');
         $infraction->setStatut($data['statut'] ?? 'en_attente');
         $infraction->setDatePaiement(isset($data['datePaiement']) ? new \DateTimeImmutable($data['datePaiement']) : null);
         $infraction->setCreeAu(new \DateTimeImmutable());
@@ -83,10 +82,13 @@ class InfractionController extends AbstractController
     {
         $data = json_decode($request->getContent(), true);
 
-        if (isset($data['numeroInfraction'])) $infraction->setNumeroInfraction($data['numeroInfraction']);
-        if (isset($data['type']))             $infraction->setType($data['type']);
-        if (isset($data['dateSaisie']))       $infraction->setDateSaisie(new \DateTimeImmutable($data['dateSaisie']));
-        if (isset($data['prix']))             $infraction->setPrix($data['prix']);
+        if (isset($data['numeroInfraction']))          $infraction->setNumeroInfraction($data['numeroInfraction']);
+        if (isset($data['type']) || isset($data['description']))
+            $infraction->setType($data['type'] ?? $data['description']);
+        if (isset($data['dateSaisie']) || isset($data['date']))
+            $infraction->setDateSaisie(new \DateTimeImmutable($data['dateSaisie'] ?? $data['date']));
+        if (isset($data['prix']) || isset($data['montant']))
+            $infraction->setPrix($data['prix'] ?? $data['montant']);
         if (isset($data['statut']))           $infraction->setStatut($data['statut']);
         if (isset($data['datePaiement']))     $infraction->setDatePaiement(new \DateTimeImmutable($data['datePaiement']));
         $infraction->setEditAu(new \DateTimeImmutable());

@@ -48,12 +48,13 @@ public function list(Request $request, UtilisateurRepository $repo): JsonRespons
         ->getResult();
 
     $data = array_map(fn($u) => [
-        'id'      => $u->getId(),
-        'email'   => $u->getEmail(),
-        'roles'   => $u->getRoles(),
-        'bureau'  => $u->getBureau()?->getId(),
-        'creePar' => $u->getCreePar()?->getId(),
-        'creeAu'  => $u->getCreeAu()?->format('Y-m-d H:i:s'),
+        'id'     => $u->getId(),
+        'email'  => $u->getEmail(),
+        'nom'    => $u->getNom(),
+        'prenom' => $u->getPrenom(),
+        'roles'  => $u->getRoles(),
+        'bureau' => $u->getBureau()?->getId(),
+        'creeAu' => $u->getCreeAu()?->format('Y-m-d H:i:s'),
     ], $utilisateurs);
 
     return $this->json([
@@ -70,13 +71,14 @@ public function list(Request $request, UtilisateurRepository $repo): JsonRespons
     public function show(Utilisateur $utilisateur): JsonResponse
     {
         return $this->json([
-            'id'      => $utilisateur->getId(),
-            'email'   => $utilisateur->getEmail(),
-            'roles'   => $utilisateur->getRoles(),
-            'bureau'  => $utilisateur->getBureau()?->getId(),
-            'creePar' => $utilisateur->getCreePar()?->getId(),
-            'creeAu'  => $utilisateur->getCreeAu()?->format('Y-m-d H:i:s'),
-            'editAu'  => $utilisateur->getEditAu()?->format('Y-m-d H:i:s'),
+            'id'     => $utilisateur->getId(),
+            'email'  => $utilisateur->getEmail(),
+            'nom'    => $utilisateur->getNom(),
+            'prenom' => $utilisateur->getPrenom(),
+            'roles'  => $utilisateur->getRoles(),
+            'bureau' => $utilisateur->getBureau()?->getId(),
+            'creeAu' => $utilisateur->getCreeAu()?->format('Y-m-d H:i:s'),
+            'editAu' => $utilisateur->getEditAu()?->format('Y-m-d H:i:s'),
         ]);
     }
 
