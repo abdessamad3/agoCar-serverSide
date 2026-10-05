@@ -1,7 +1,7 @@
 nelmio_cors:
     defaults:
         origin_regex: true
-        allow_origin: ['^https?://(localhost|127\.0\.0\.1)(:[0-9]+)?$']
+        allow_origin: ['^https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+)(:[0-9]+)?$']
         allow_methods: ['GET', 'OPTIONS', 'POST', 'PUT', 'PATCH', 'DELETE']
         allow_headers: ['Content-Type', 'Authorization']
         allow_credentials: false
@@ -9,7 +9,7 @@ nelmio_cors:
     paths:
         '^/':
             origin_regex: true
-            allow_origin: ['^https?://(localhost|127\.0\.0\.1)(:[0-9]+)?$']
+            allow_origin: ['^https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+)(:[0-9]+)?$']
             allow_methods: ['GET', 'OPTIONS', 'POST', 'PUT', 'PATCH', 'DELETE']
             allow_headers: ['Content-Type', 'Authorization']
             allow_credentials: false

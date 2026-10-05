@@ -5,15 +5,26 @@ namespace App\Controller\Api;
 use App\Entity\Credit;
 use App\Repository\CreditRepository;
 use App\Repository\VoitureRepository;
+use App\Trait\BureauAwareTrait;
+use App\Trait\PaginationTrait;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Annotation\Route;
 
+/**
+ * @deprecated Superseded by {@see VehicleCreditController}. No frontend code
+ * creates new records here anymore — the legacy /credit list page redirects
+ * its "Add" action to /vehicle-financing/create. Routes are left intact and
+ * fully functional, not disabled, as the rollback path.
+ */
 #[Route('/api/credit', name: 'app_api_credit_')]
 class CreditController extends AbstractController
 {
+    use BureauAwareTrait;
+    use PaginationTrait;
+
     private function serialize(Credit $c, bool $withPaiements = false): array
     {
         $voit = $c->getVoiture();
@@ -41,9 +52,28 @@ class CreditController extends AbstractController
     }
 
     #[Route('', name: 'list', methods: ['GET'])]
-    public function list(CreditRepository $repo): JsonResponse
+    public function list(Request $request, EntityManagerInterface $em): JsonResponse
     {
-        return $this->json(array_map(fn($c) => $this->serialize($c), $repo->findAll()));
+        $bureauId = $this->getEffectiveBureauId();
+        $page     = $this->getPageParam($request);
+        $search   = trim((string) $request->query->get('search', ''));
+
+        $qb = $em->createQueryBuilder()
+            ->select('c')
+            ->from(\App\Entity\Credit::class, 'c')
+            ->join('c.voiture', 'v')
+            ->orderBy('c.dateDebut', 'DESC');
+
+        if ($bureauId) {
+            $qb->where('v.bureau = :bureauId')->setParameter('bureauId', $bureauId);
+        }
+        if ($search) {
+            $qb->andWhere('v.immatriculation LIKE :s OR v.marque LIKE :s OR v.modele LIKE :s')
+               ->setParameter('s', "%$search%");
+        }
+
+        [$items, $total] = $this->paginateQb($qb, $page);
+        return $this->json(['data' => array_map(fn($c) => $this->serialize($c), $items), 'meta' => $this->paginateMeta($total, $page)]);
     }
 
     #[Route('/{id}', name: 'show', methods: ['GET'])]
@@ -102,9 +132,9 @@ class CreditController extends AbstractController
     #[Route('/{id}', name: 'delete', methods: ['DELETE'])]
     public function delete(Credit $credit, EntityManagerInterface $em): JsonResponse
     {
-        $em->remove($credit);
+        $credit->setDeletedAt(new \DateTimeImmutable());
         $em->flush();
 
-        return $this->json(['message' => 'Crédit supprimé'], 204);
+        return $this->json(['message' => 'Crédit supprimé'], 200);
     }
 }

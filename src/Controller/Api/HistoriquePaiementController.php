@@ -6,14 +6,27 @@ use App\Entity\HistoriquePaiement;
 use App\Repository\HistoriquePaiementRepository;
 use App\Repository\ReservationRepository;
 use Doctrine\ORM\EntityManagerInterface;
+use App\Trait\BureauAwareTrait;
+use App\Trait\PaginationTrait;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Annotation\Route;
+use Symfony\Component\Security\Http\Attribute\IsGranted;
 
+/**
+ * @deprecated Superseded by {@see PaiementController}. No frontend code calls these
+ * routes anymore as of the Phase 3 cutover (location-dossier, paiement-client, and
+ * paiement-list all moved to /api/paiement). Routes are left intact and fully
+ * functional — not disabled — as the rollback path; do not build new features here.
+ */
 #[Route('/api/historique-paiement', name: 'app_api_historique_paiement_')]
+#[IsGranted('ROLE_USER')]
 class HistoriquePaiementController extends AbstractController
 {
+    use BureauAwareTrait;
+    use PaginationTrait;
+
     private function serialize(HistoriquePaiement $p): array
     {
         $res = $p->getReservation();
@@ -37,10 +50,26 @@ class HistoriquePaiementController extends AbstractController
     }
 
     #[Route('', name: 'list', methods: ['GET'])]
-    public function list(HistoriquePaiementRepository $repo): JsonResponse
+    public function list(Request $request, EntityManagerInterface $em): JsonResponse
     {
-        $items = $repo->findBy([], ['datePaiement' => 'DESC', 'id' => 'DESC']);
-        return $this->json(array_map(fn($p) => $this->serialize($p), $items));
+        $bureauId = $this->getEffectiveBureauId();
+        $page     = $this->getPageParam($request);
+
+        $qb = $em->createQueryBuilder()
+            ->select('hp')
+            ->from(HistoriquePaiement::class, 'hp')
+            ->join('hp.reservation', 'r')
+            ->join('r.voiture', 'v')
+            ->where('hp.deletedAt IS NULL')
+            ->orderBy('hp.datePaiement', 'DESC')
+            ->addOrderBy('hp.id', 'DESC');
+
+        if ($bureauId !== null) {
+            $qb->andWhere('v.bureau = :bureauId')->setParameter('bureauId', $bureauId);
+        }
+
+        [$items, $total] = $this->paginateQb($qb, $page);
+        return $this->json(['data' => array_map(fn($p) => $this->serialize($p), $items), 'meta' => $this->paginateMeta($total, $page)]);
     }
 
     #[Route('', name: 'create', methods: ['POST'])]
@@ -69,13 +98,11 @@ class HistoriquePaiementController extends AbstractController
         $hp->setNote($data['note'] ?? null);
         $hp->setCreeAu(new \DateTimeImmutable());
 
-        // Update reservation.montantPaye
-        $newPaid = (float) $reservation->getMontantPaye() + $montant;
-        $total   = (float) $reservation->getTotal();
-        $reservation->setMontantPaye((string) min($newPaid, $total));
-
         $em->persist($hp);
         $em->flush();
+
+        // Recompute montantPaye as exact sum of all active payments
+        $this->recomputeMontantPaye($reservation, $em);
 
         return $this->json($this->serialize($hp), 201);
     }
@@ -84,14 +111,28 @@ class HistoriquePaiementController extends AbstractController
     public function delete(HistoriquePaiement $hp, EntityManagerInterface $em): JsonResponse
     {
         $reservation = $hp->getReservation();
-        if ($reservation) {
-            $newPaid = max(0, (float) $reservation->getMontantPaye() - (float) $hp->getMontant());
-            $reservation->setMontantPaye((string) $newPaid);
-        }
-
-        $em->remove($hp);
+        $hp->setDeletedAt(new \DateTimeImmutable());
         $em->flush();
 
-        return $this->json(['message' => 'Paiement supprimé'], 204);
+        if ($reservation) {
+            $this->recomputeMontantPaye($reservation, $em);
+        }
+
+        return $this->json(['message' => 'Paiement supprimé'], 200);
+    }
+
+    private function recomputeMontantPaye(\App\Entity\Reservation $reservation, EntityManagerInterface $em): void
+    {
+        $sum = $em->createQueryBuilder()
+            ->select('SUM(hp.montant)')
+            ->from(HistoriquePaiement::class, 'hp')
+            ->where('hp.reservation = :res')
+            ->andWhere('hp.deletedAt IS NULL')
+            ->setParameter('res', $reservation)
+            ->getQuery()
+            ->getSingleScalarResult();
+
+        $reservation->setMontantPaye((string) max(0.0, (float) ($sum ?? 0)));
+        $em->flush();
     }
 }

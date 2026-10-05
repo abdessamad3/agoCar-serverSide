@@ -7,6 +7,19 @@ use Doctrine\Common\Collections\ArrayCollection;
 use Doctrine\Common\Collections\Collection;
 use Doctrine\ORM\Mapping as ORM;
 
+/**
+ * @deprecated Superseded by {@see VehicleCredit}, which models the same
+ * "vehicle financing contract" concept with a richer field set (financial
+ * institution linkage, proper status lifecycle, installment/document/reminder
+ * sub-entities) and is the only one of the two with a dashboard-stats endpoint.
+ * Kept intact (not dropped) as the rollback source, same pattern as
+ * HistoriquePaiement. Do not add new write paths to this entity.
+ *
+ * Note: AchatVoiture is a *different* concept (the vehicle purchase event
+ * itself, including cash purchases with no financing at all) and is NOT
+ * superseded by VehicleCredit — it remains the correct, actively-used entity
+ * for recording how/when a vehicle was acquired.
+ */
 #[ORM\Entity(repositoryClass: CreditRepository::class)]
 class Credit
 {
@@ -45,6 +58,9 @@ class Credit
     #[ORM\Column(type: 'datetime_immutable', nullable: true)]
     private ?\DateTimeImmutable $editAu = null;
 
+    #[ORM\Column(type: 'datetime_immutable', nullable: true)]
+    private ?\DateTimeImmutable $deletedAt = null;
+
     #[ORM\OneToMany(targetEntity: Paiement::class, mappedBy: 'credit')]
     private Collection $paiements;
 
@@ -74,6 +90,8 @@ class Credit
     public function setCreeAu(?\DateTimeImmutable $creeAu): static { $this->creeAu = $creeAu; return $this; }
     public function getEditAu(): ?\DateTimeImmutable { return $this->editAu; }
     public function setEditAu(?\DateTimeImmutable $editAu): static { $this->editAu = $editAu; return $this; }
+    public function getDeletedAt(): ?\DateTimeImmutable { return $this->deletedAt; }
+    public function setDeletedAt(?\DateTimeImmutable $deletedAt): static { $this->deletedAt = $deletedAt; return $this; }
     public function getPaiements(): Collection { return $this->paiements; }
     public function addPaiement(Paiement $paiement): static { if (!$this->paiements->contains($paiement)) { $this->paiements->add($paiement); $paiement->setCredit($this); } return $this; }
     public function removePaiement(Paiement $paiement): static { if ($this->paiements->removeElement($paiement)) { if ($paiement->getCredit() === $this) { $paiement->setCredit(null); } } return $this; }

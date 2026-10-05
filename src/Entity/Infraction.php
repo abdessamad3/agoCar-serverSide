@@ -43,6 +43,9 @@ class Infraction
     #[ORM\Column(type: 'datetime_immutable', nullable: true)]
     private ?\DateTimeImmutable $editAu = null;
 
+    #[ORM\Column(type: 'datetime_immutable', nullable: true)]
+    private ?\DateTimeImmutable $deletedAt = null;
+
     public function getId(): ?int { return $this->id; }
     public function getNumeroInfraction(): ?int { return $this->numeroInfraction; }
     public function setNumeroInfraction(int $numeroInfraction): static { $this->numeroInfraction = $numeroInfraction; return $this; }
@@ -64,4 +67,6 @@ class Infraction
     public function setCreeAu(?\DateTimeImmutable $creeAu): static { $this->creeAu = $creeAu; return $this; }
     public function getEditAu(): ?\DateTimeImmutable { return $this->editAu; }
     public function setEditAu(?\DateTimeImmutable $editAu): static { $this->editAu = $editAu; return $this; }
+    public function getDeletedAt(): ?\DateTimeImmutable { return $this->deletedAt; }
+    public function setDeletedAt(?\DateTimeImmutable $deletedAt): static { $this->deletedAt = $deletedAt; return $this; }
 }

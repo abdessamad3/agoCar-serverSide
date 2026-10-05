@@ -20,6 +20,9 @@ class Vidange
     #[ORM\Column]
     private ?int $kilometrageSuivant = null;
 
+    #[ORM\Column(nullable: true)]
+    private ?int $intervalleKm = 10000;
+
     #[ORM\Column]
     private bool $filtreAir = false;
 
@@ -38,11 +41,22 @@ class Vidange
     #[ORM\Column(type: 'datetime_immutable', nullable: true)]
     private ?\DateTimeImmutable $editAu = null;
 
+    #[ORM\Column(length: 500, nullable: true)]
+    private ?string $filePath = null;
+
+    #[ORM\Column(type: 'json', nullable: true)]
+    private array $filePaths = [];
+
+    #[ORM\Column(type: 'datetime_immutable', nullable: true)]
+    private ?\DateTimeImmutable $deletedAt = null;
+
     public function getId(): ?int { return $this->id; }
     public function getDepense(): ?Depense { return $this->depense; }
     public function setDepense(?Depense $depense): static { $this->depense = $depense; return $this; }
     public function getKilometrageSuivant(): ?int { return $this->kilometrageSuivant; }
     public function setKilometrageSuivant(int $kilometrageSuivant): static { $this->kilometrageSuivant = $kilometrageSuivant; return $this; }
+    public function getIntervalleKm(): ?int { return $this->intervalleKm; }
+    public function setIntervalleKm(?int $intervalleKm): static { $this->intervalleKm = $intervalleKm; return $this; }
     public function isFiltreAir(): bool { return $this->filtreAir; }
     public function setFiltreAir(bool $filtreAir): static { $this->filtreAir = $filtreAir; return $this; }
     public function isFiltreHuile(): bool { return $this->filtreHuile; }
@@ -55,4 +69,10 @@ class Vidange
     public function setCreeAu(?\DateTimeImmutable $creeAu): static { $this->creeAu = $creeAu; return $this; }
     public function getEditAu(): ?\DateTimeImmutable { return $this->editAu; }
     public function setEditAu(?\DateTimeImmutable $editAu): static { $this->editAu = $editAu; return $this; }
+    public function getFilePath(): ?string { return $this->filePath; }
+    public function setFilePath(?string $filePath): static { $this->filePath = $filePath; return $this; }
+    public function getFilePaths(): array { return $this->filePaths ?? []; }
+    public function setFilePaths(array $filePaths): static { $this->filePaths = $filePaths; return $this; }
+    public function getDeletedAt(): ?\DateTimeImmutable { return $this->deletedAt; }
+    public function setDeletedAt(?\DateTimeImmutable $deletedAt): static { $this->deletedAt = $deletedAt; return $this; }
 }

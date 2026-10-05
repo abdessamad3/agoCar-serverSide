@@ -2,13 +2,19 @@
 
 namespace App\Controller\Api;
 
+use App\Entity\Reservation;
+use App\Entity\VehicleCreditInstallment;
 use App\Repository\VoitureRepository;
 use App\Repository\ReservationRepository;
 use App\Repository\ClientRepository;
 use App\Repository\DepenseRepository;
+use App\Service\DashboardAggregatorService;
+use App\Service\OilChangeService;
+use App\Trait\BureauAwareTrait;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Annotation\Route;
 use Symfony\Component\Security\Http\Attribute\IsGranted;
 
@@ -16,38 +22,76 @@ use Symfony\Component\Security\Http\Attribute\IsGranted;
 #[Route('/api/dashboard', name: 'app_api_dashboard_')]
 class DashboardController extends AbstractController
 {
+    use BureauAwareTrait;
+
     public function __construct(
-        private VoitureRepository $voitureRepo,
-        private ReservationRepository $reservationRepo,
-        private ClientRepository $clientRepo,
-        private DepenseRepository $depenseRepo,
-        private EntityManagerInterface $em
+        private VoitureRepository          $voitureRepo,
+        private ReservationRepository      $reservationRepo,
+        private ClientRepository           $clientRepo,
+        private DepenseRepository          $depenseRepo,
+        private OilChangeService           $oilChangeService,
+        private DashboardAggregatorService $aggregator,
+        private EntityManagerInterface     $em,
     ) {}
 
-    #[Route('/stats', name: 'stats', methods: ['GET'])]
-    public function getStats(): JsonResponse
+    #[Route('/aggregate', name: 'aggregate', methods: ['GET'])]
+    public function aggregate(): JsonResponse
     {
+        $bureauId = $this->getEffectiveBureauId();
+        return $this->json($this->aggregator->aggregate($bureauId ?: null));
+    }
+
+    #[Route('/stats', name: 'stats', methods: ['GET'])]
+    public function getStats(Request $request): JsonResponse
+    {
+        $bureauId = (int) $request->query->get('bureauId', 0);
         $now = new \DateTime();
 
-        $totalVoitures    = $this->voitureRepo->count([]);
-        $availableVoitures = $this->voitureRepo->count(['voitureStatus' => 'available']);
-        $totalClients     = $this->clientRepo->count([]);
+        if ($bureauId) {
+            $totalVoitures = (int) $this->voitureRepo->createQueryBuilder('v')
+                ->select('COUNT(v.id)')->where('v.bureau = :bid')->setParameter('bid', $bureauId)
+                ->getQuery()->getSingleScalarResult();
+            $availableVoitures = (int) $this->voitureRepo->createQueryBuilder('v')
+                ->select('COUNT(v.id)')->where('v.bureau = :bid AND v.voitureStatus = :s')
+                ->setParameter('bid', $bureauId)->setParameter('s', 'available')
+                ->getQuery()->getSingleScalarResult();
+            $totalClients = count(array_unique(array_column(
+                $this->em->createQueryBuilder()
+                    ->select('c.id as cid')
+                    ->from(Reservation::class, 'r')
+                    ->join('r.voiture', 'v')
+                    ->join('r.client', 'c')
+                    ->where('v.bureau = :bid')
+                    ->setParameter('bid', $bureauId)->getQuery()->getScalarResult(),
+                'cid'
+            )));
+        } else {
+            $totalVoitures     = $this->voitureRepo->count([]);
+            $availableVoitures = $this->voitureRepo->count(['voitureStatus' => 'available']);
+            $totalClients      = $this->clientRepo->count([]);
+        }
 
-        $activeReservations = (int) $this->reservationRepo->createQueryBuilder('r')
-            ->select('COUNT(r.id)')
-            ->where('r.dateDebut <= :now')->andWhere('r.dateFin >= :now')
-            ->setParameter('now', $now)
-            ->getQuery()->getSingleScalarResult();
+        $qbActive = $this->reservationRepo->createQueryBuilder('r')
+            ->select('COUNT(r.id)')->where('r.dateDebut <= :now')->andWhere('r.dateFin >= :now')
+            ->setParameter('now', $now);
+        if ($bureauId) {
+            $qbActive->join('r.voiture', 'bv')->andWhere('bv.bureau = :bid')->setParameter('bid', $bureauId);
+        }
+        $activeReservations = (int) $qbActive->getQuery()->getSingleScalarResult();
 
-        // Revenue = sum of all reservation totals
-        $revenue = (float) ($this->reservationRepo->createQueryBuilder('r')
-            ->select('SUM(r.total)')
-            ->getQuery()->getSingleScalarResult() ?? 0);
+        $qbRev = $this->reservationRepo->createQueryBuilder('r')->select('SUM(r.total)');
+        if ($bureauId) {
+            $qbRev->join('r.voiture', 'bv')->where('bv.bureau = :bid')->setParameter('bid', $bureauId);
+        }
+        $revenue = (float) ($qbRev->getQuery()->getSingleScalarResult() ?? 0);
 
-        // Expenses = sum of all depenses
-        $expenses = (float) ($this->depenseRepo->createQueryBuilder('d')
-            ->select('SUM(d.montant)')
-            ->getQuery()->getSingleScalarResult() ?? 0);
+        $qbExp = $this->depenseRepo->createQueryBuilder('d')->select('SUM(d.montant)');
+        if ($bureauId) {
+            $qbExp->leftJoin('d.voiture', 'v')
+                  ->where('d.bureau = :bid OR v.bureau = :bid')
+                  ->setParameter('bid', $bureauId);
+        }
+        $expenses = (float) ($qbExp->getQuery()->getSingleScalarResult() ?? 0);
 
         $utilizationRate = $totalVoitures > 0
             ? round((($totalVoitures - $availableVoitures) / $totalVoitures) * 100, 1)
@@ -66,135 +110,137 @@ class DashboardController extends AbstractController
     }
 
     #[Route('/voitures-status', name: 'voitures_status', methods: ['GET'])]
-    public function getVoituresStatus(): JsonResponse
+    public function getVoituresStatus(Request $request): JsonResponse
     {
-        // Breakdown of voitures by status
-        $qb = $this->voitureRepo->createQueryBuilder('v');
-        $qb->select('v.voitureStatus, COUNT(v.id) as count')
-           ->groupBy('v.voitureStatus');
-
-        $results = $qb->getQuery()->getResult();
-
-        $statusBreakdown = [];
-        foreach ($results as $result) {
-            $statusBreakdown[$result['voitureStatus']] = (int) $result['count'];
+        $bureauId = (int) $request->query->get('bureauId', 0);
+        $qb = $this->voitureRepo->createQueryBuilder('v')
+            ->select('v.voitureStatus, COUNT(v.id) as count')
+            ->groupBy('v.voitureStatus');
+        if ($bureauId) {
+            $qb->where('v.bureau = :bid')->setParameter('bid', $bureauId);
         }
 
-        return $this->json([
-            'voituresByStatus' => $statusBreakdown
-        ]);
+        $statusBreakdown = [];
+        foreach ($qb->getQuery()->getResult() as $r) {
+            $statusBreakdown[$r['voitureStatus']] = (int) $r['count'];
+        }
+
+        return $this->json(['voituresByStatus' => $statusBreakdown]);
     }
 
     #[Route('/reservations-status', name: 'reservations_status', methods: ['GET'])]
-    public function getReservationsStatus(): JsonResponse
+    public function getReservationsStatus(Request $request): JsonResponse
     {
-        // Count of reservations by status
-        $qb = $this->reservationRepo->createQueryBuilder('r');
-        
+        $bureauId = (int) $request->query->get('bureauId', 0);
         $now = new \DateTime();
 
-        // Active (currently happening)
-        $active = (int) $qb
-            ->select('COUNT(r.id)')
-            ->where('r.dateDebut <= :now')
-            ->andWhere('r.dateFin >= :now')
-            ->setParameter('now', $now)
-            ->getQuery()
-            ->getSingleScalarResult();
+        $makeQb = function () use ($bureauId): \Doctrine\ORM\QueryBuilder {
+            $qb = $this->reservationRepo->createQueryBuilder('r');
+            if ($bureauId) {
+                $qb->join('r.voiture', 'bv')->andWhere('bv.bureau = :bid')->setParameter('bid', $bureauId);
+            }
+            return $qb;
+        };
 
-        // Upcoming (in the future)
-        $qbUpcoming = $this->reservationRepo->createQueryBuilder('r');
-        $upcoming = (int) $qbUpcoming
-            ->select('COUNT(r.id)')
-            ->where('r.dateDebut > :now')
-            ->setParameter('now', $now)
-            ->getQuery()
-            ->getSingleScalarResult();
+        $active = (int) $makeQb()->select('COUNT(r.id)')
+            ->andWhere('r.dateDebut <= :now')->andWhere('r.dateFin >= :now')
+            ->setParameter('now', $now)->getQuery()->getSingleScalarResult();
 
-        // Past (completed)
-        $qbPast = $this->reservationRepo->createQueryBuilder('r');
-        $past = (int) $qbPast
-            ->select('COUNT(r.id)')
-            ->where('r.dateFin < :now')
-            ->setParameter('now', $now)
-            ->getQuery()
-            ->getSingleScalarResult();
+        $upcoming = (int) $makeQb()->select('COUNT(r.id)')
+            ->andWhere('r.dateDebut > :now')
+            ->setParameter('now', $now)->getQuery()->getSingleScalarResult();
+
+        $past = (int) $makeQb()->select('COUNT(r.id)')
+            ->andWhere('r.dateFin < :now')
+            ->setParameter('now', $now)->getQuery()->getSingleScalarResult();
 
         return $this->json([
-            'active' => $active,
+            'active'   => $active,
             'upcoming' => $upcoming,
-            'past' => $past,
-            'total' => $active + $upcoming + $past
+            'past'     => $past,
+            'total'    => $active + $upcoming + $past,
         ]);
     }
 
     #[Route('/revenue-summary', name: 'revenue_summary', methods: ['GET'])]
-    public function getRevenueSummary(): JsonResponse
+    public function getRevenueSummary(Request $request): JsonResponse
     {
+        $bureauId     = (int) $request->query->get('bureauId', 0);
         $startOfMonth = (new \DateTime('first day of this month'))->setTime(0, 0, 0);
         $endOfMonth   = (new \DateTime('last day of this month'))->setTime(23, 59, 59);
         $startOfYear  = new \DateTime('first day of January this year');
         $endOfYear    = new \DateTime('last day of December this year');
 
-        $totalRevenue = (float) ($this->reservationRepo->createQueryBuilder('r')
-            ->select('SUM(r.total)')->getQuery()->getSingleScalarResult() ?? 0);
+        $makeResQb = function () use ($bureauId): \Doctrine\ORM\QueryBuilder {
+            $qb = $this->reservationRepo->createQueryBuilder('r');
+            if ($bureauId) {
+                $qb->join('r.voiture', 'bv')->andWhere('bv.bureau = :bid')->setParameter('bid', $bureauId);
+            }
+            return $qb;
+        };
 
-        $monthRevenue = (float) ($this->reservationRepo->createQueryBuilder('r')
-            ->select('SUM(r.total)')
-            ->where('r.creeAu >= :start')->andWhere('r.creeAu <= :end')
-            ->setParameter('start', $startOfMonth)->setParameter('end', $endOfMonth)
+        $makeDepQb = function () use ($bureauId): \Doctrine\ORM\QueryBuilder {
+            $qb = $this->depenseRepo->createQueryBuilder('d');
+            if ($bureauId) {
+                $qb->leftJoin('d.voiture', 'v')
+                   ->where('d.bureau = :bid OR v.bureau = :bid')
+                   ->setParameter('bid', $bureauId);
+            }
+            return $qb;
+        };
+
+        $totalRevenue = (float) ($makeResQb()->select('SUM(r.total)')->getQuery()->getSingleScalarResult() ?? 0);
+
+        $monthRevenue = (float) ($makeResQb()->select('SUM(r.total)')
+            ->andWhere('r.creeAu >= :s')->andWhere('r.creeAu <= :e')
+            ->setParameter('s', $startOfMonth)->setParameter('e', $endOfMonth)
             ->getQuery()->getSingleScalarResult() ?? 0);
 
-        $yearRevenue = (float) ($this->reservationRepo->createQueryBuilder('r')
-            ->select('SUM(r.total)')
-            ->where('r.creeAu >= :start')->andWhere('r.creeAu <= :end')
-            ->setParameter('start', $startOfYear)->setParameter('end', $endOfYear)
+        $yearRevenue = (float) ($makeResQb()->select('SUM(r.total)')
+            ->andWhere('r.creeAu >= :s')->andWhere('r.creeAu <= :e')
+            ->setParameter('s', $startOfYear)->setParameter('e', $endOfYear)
             ->getQuery()->getSingleScalarResult() ?? 0);
 
-        $totalExpenses = (float) ($this->depenseRepo->createQueryBuilder('d')
-            ->select('SUM(d.montant)')->getQuery()->getSingleScalarResult() ?? 0);
+        $totalExpenses = (float) ($makeDepQb()->select('SUM(d.montant)')->getQuery()->getSingleScalarResult() ?? 0);
 
-        $monthExpenses = (float) ($this->depenseRepo->createQueryBuilder('d')
-            ->select('SUM(d.montant)')
-            ->where('d.creeAu >= :start')->andWhere('d.creeAu <= :end')
-            ->setParameter('start', $startOfMonth)->setParameter('end', $endOfMonth)
+        $monthExpenses = (float) ($makeDepQb()->select('SUM(d.montant)')
+            ->andWhere('d.creeAu >= :s')->andWhere('d.creeAu <= :e')
+            ->setParameter('s', $startOfMonth)->setParameter('e', $endOfMonth)
             ->getQuery()->getSingleScalarResult() ?? 0);
 
-        $monthReservations = (int) ($this->reservationRepo->createQueryBuilder('r')
-            ->select('COUNT(r.id)')
-            ->where('r.creeAu >= :start')->andWhere('r.creeAu <= :end')
-            ->setParameter('start', $startOfMonth)->setParameter('end', $endOfMonth)
+        $monthReservations = (int) ($makeResQb()->select('COUNT(r.id)')
+            ->andWhere('r.creeAu >= :s')->andWhere('r.creeAu <= :e')
+            ->setParameter('s', $startOfMonth)->setParameter('e', $endOfMonth)
             ->getQuery()->getSingleScalarResult() ?? 0);
 
         return $this->json([
-            'totalRevenue'       => $totalRevenue,
-            'monthRevenue'       => $monthRevenue,
-            'yearRevenue'        => $yearRevenue,
-            'totalExpenses'      => $totalExpenses,
-            'monthExpenses'      => $monthExpenses,
-            'monthNetProfit'     => $monthRevenue - $monthExpenses,
-            'totalNetProfit'     => $totalRevenue - $totalExpenses,
-            'monthReservations'  => $monthReservations,
+            'totalRevenue'      => $totalRevenue,
+            'monthRevenue'      => $monthRevenue,
+            'yearRevenue'       => $yearRevenue,
+            'totalExpenses'     => $totalExpenses,
+            'monthExpenses'     => $monthExpenses,
+            'monthNetProfit'    => $monthRevenue - $monthExpenses,
+            'totalNetProfit'    => $totalRevenue - $totalExpenses,
+            'monthReservations' => $monthReservations,
         ]);
     }
+
     #[Route('/recent-reservations', name: 'recent_reservations', methods: ['GET'])]
-    public function getRecentReservations(): JsonResponse
+    public function getRecentReservations(Request $request): JsonResponse
     {
-        // Last 10 reservations
-        $qb = $this->reservationRepo->createQueryBuilder('r');
-        $reservations = $qb
-            ->orderBy('r.creeAu', 'DESC')
-            ->setMaxResults(10)
-            ->getQuery()
-            ->getResult();
+        $bureauId = (int) $request->query->get('bureauId', 0);
+        $limit = min(100, max(1, (int) $request->query->get('limit', 10)));
+        $qb = $this->reservationRepo->createQueryBuilder('r')->orderBy('r.creeAu', 'DESC')->setMaxResults($limit);
+        if ($bureauId) {
+            $qb->join('r.voiture', 'bv')->where('bv.bureau = :bid')->setParameter('bid', $bureauId);
+        }
+        $reservations = $qb->getQuery()->getResult();
 
         $data = array_map(function ($r) {
-            $total = (float) $r->getTotal();
+            $total     = (float) $r->getTotal();
             $dateDebut = $r->getDateDebut();
             $dateFin   = $r->getDateFin();
-            $days = ($dateDebut && $dateFin)
-                ? (int) $dateDebut->diff($dateFin)->days
-                : 0;
+            $days = ($dateDebut && $dateFin) ? (int) $dateDebut->diff($dateFin)->days : 0;
             return [
                 'id'                => $r->getId(),
                 'client'            => ['id' => $r->getClient()?->getId(), 'nom' => $r->getClient()?->getNom()],
@@ -216,29 +262,96 @@ class DashboardController extends AbstractController
             ];
         }, $reservations);
 
-        return $this->json([
-            'data' => $data,
-            'count' => count($data)
-        ]);
+        return $this->json(['data' => $data, 'count' => count($data)]);
     }
 
     #[Route('/voitures-by-fuel', name: 'voitures_by_fuel', methods: ['GET'])]
-    public function getVoituresByFuel(): JsonResponse
+    public function getVoituresByFuel(Request $request): JsonResponse
     {
-        // Voitures grouped by fuel type
-        $qb = $this->voitureRepo->createQueryBuilder('v');
-        $qb->select('v.typeCarburant, COUNT(v.id) as count')
-           ->groupBy('v.typeCarburant');
-
-        $results = $qb->getQuery()->getResult();
-
-        $fuelBreakdown = [];
-        foreach ($results as $result) {
-            $fuelBreakdown[$result['typeCarburant']] = (int) $result['count'];
+        $bureauId = (int) $request->query->get('bureauId', 0);
+        $qb = $this->voitureRepo->createQueryBuilder('v')
+            ->select('v.typeCarburant, COUNT(v.id) as count')
+            ->groupBy('v.typeCarburant');
+        if ($bureauId) {
+            $qb->where('v.bureau = :bid')->setParameter('bid', $bureauId);
         }
 
+        $fuelBreakdown = [];
+        foreach ($qb->getQuery()->getResult() as $r) {
+            $fuelBreakdown[$r['typeCarburant']] = (int) $r['count'];
+        }
+
+        return $this->json(['voituresByFuel' => $fuelBreakdown]);
+    }
+
+    #[Route('/oil-reminders', name: 'oil_reminders', methods: ['GET'])]
+    public function getOilReminders(Request $request): JsonResponse
+    {
+        $bureauId = (int) $request->query->get('bureauId', 0);
+        return $this->json($this->oilChangeService->getDashboardSummary($bureauId));
+    }
+
+    /**
+     * Returns net profit and pending amount for the top header. Kept in sync with
+     * ProfitabilityService::getVehicleProfitability(): revenue is cash actually collected
+     * (montantPaye), but expenses use the full committed amount (montant), not just what's
+     * been paid — an unpaid expense still reduces profitability, it just hasn't hit cash yet.
+     */
+    #[Route('/profit-summary', name: 'profit_summary', methods: ['GET'])]
+    public function profitSummary(Request $request): JsonResponse
+    {
+        $bureauId = $this->getEffectiveBureauId() ?: ((int) $request->query->get('bureauId', 0)) ?: null;
+
+        $cancelledStatuses = ['annulee', 'annule', 'cancelled'];
+
+        $qb = $this->reservationRepo->createQueryBuilder('r')
+            ->select('r.reservationStatus', 'r.total', 'r.montantPaye')
+            ->where('r.deletedAt IS NULL');
+        if ($bureauId) {
+            $qb->join('r.voiture', 'v')->andWhere('v.bureau = :bid')->setParameter('bid', $bureauId);
+        }
+        $rows = $qb->getQuery()->getScalarResult();
+
+        $revenue       = 0.0;
+        $pendingAmount = 0.0;
+        foreach ($rows as $row) {
+            $status = strtolower($row['reservationStatus'] ?? '');
+            $total  = (float) ($row['total'] ?? 0);
+            $paid   = (float) ($row['montantPaye'] ?? 0);
+
+            if (!in_array($status, $cancelledStatuses, true)) {
+                $revenue       += $paid;
+                $pendingAmount += max(0.0, $total - $paid);
+            }
+        }
+
+        $expQb = $this->depenseRepo->createQueryBuilder('d')
+            ->select('SUM(d.montant) as total')
+            ->leftJoin('d.voiture', 'v')
+            ->where('d.deletedAt IS NULL')
+            ->andWhere('v.id IS NULL OR v.deletedAt IS NULL');
+        if ($bureauId) {
+            $expQb->andWhere('d.bureau = :bid OR v.bureau = :bid')->setParameter('bid', $bureauId);
+        }
+        $expenses = (float) ($expQb->getQuery()->getSingleScalarResult() ?? 0);
+
+        // Credit installments actually paid — mirrors ProfitabilityService's credit handling.
+        $creditQb = $this->em->createQueryBuilder()
+            ->select('SUM(i.amountPaid) as total')
+            ->from(VehicleCreditInstallment::class, 'i')
+            ->join('i.vehicleCredit', 'vc')
+            ->join('vc.voiture', 'v')
+            ->where("i.status IN ('paid', 'partial')")
+            ->andWhere('i.paidAt IS NOT NULL')
+            ->andWhere('v.deletedAt IS NULL');
+        if ($bureauId) {
+            $creditQb->andWhere('v.bureau = :bid')->setParameter('bid', $bureauId);
+        }
+        $creditPaid = (float) ($creditQb->getQuery()->getSingleScalarResult() ?? 0);
+
         return $this->json([
-            'voituresByFuel' => $fuelBreakdown
+            'netProfit'     => round($revenue - $expenses - $creditPaid, 2),
+            'pendingAmount' => round($pendingAmount, 2),
         ]);
     }
 }

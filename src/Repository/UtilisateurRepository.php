@@ -16,6 +16,12 @@ class UtilisateurRepository extends ServiceEntityRepository
         parent::__construct($registry, Utilisateur::class);
     }
 
+    /** @return Utilisateur[] */
+    public function findActive(): array
+    {
+        return $this->findBy(['actif' => true]);
+    }
+
 //    /**
 //     * @return Utilisateur[] Returns an array of Utilisateur objects
 //     */

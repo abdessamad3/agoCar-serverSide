@@ -5,6 +5,14 @@ namespace App\Entity;
 use App\Repository\HistoriquePaiementRepository;
 use Doctrine\ORM\Mapping as ORM;
 
+/**
+ * @deprecated Superseded by {@see Paiement} (reservation payment unification, Phase 1-5).
+ * No longer written to as of the Phase 3 frontend cutover — all reservation payment
+ * reads/writes go through Paiement now. This entity, its table, and its repository
+ * are intentionally kept intact (not dropped) as the rollback source until the
+ * migration is fully validated against real data and the rollback window elapses.
+ * Do not add new write paths to this entity.
+ */
 #[ORM\Entity(repositoryClass: HistoriquePaiementRepository::class)]
 class HistoriquePaiement
 {
@@ -32,6 +40,9 @@ class HistoriquePaiement
     #[ORM\Column(type: 'datetime_immutable', name: 'cree_au')]
     private ?\DateTimeImmutable $creeAu = null;
 
+    #[ORM\Column(type: 'datetime_immutable', nullable: true)]
+    private ?\DateTimeImmutable $deletedAt = null;
+
     public function getId(): ?int { return $this->id; }
 
     public function getReservation(): ?Reservation { return $this->reservation; }
@@ -51,4 +62,6 @@ class HistoriquePaiement
 
     public function getCreeAu(): ?\DateTimeImmutable { return $this->creeAu; }
     public function setCreeAu(\DateTimeImmutable $creeAu): static { $this->creeAu = $creeAu; return $this; }
+    public function getDeletedAt(): ?\DateTimeImmutable { return $this->deletedAt; }
+    public function setDeletedAt(?\DateTimeImmutable $deletedAt): static { $this->deletedAt = $deletedAt; return $this; }
 }

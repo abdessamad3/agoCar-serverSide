@@ -5,6 +5,7 @@ namespace App\Controller\Api;
 use App\Entity\Fournisseur;
 use App\Repository\FournisseurRepository;
 use Doctrine\ORM\EntityManagerInterface;
+use App\Trait\PaginationTrait;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -13,6 +14,8 @@ use Symfony\Component\Routing\Annotation\Route;
 #[Route('/api/fournisseur', name: 'app_api_fournisseur_')]
 class FournisseurController extends AbstractController
 {
+    use PaginationTrait;
+
     private function serialize(Fournisseur $f): array
     {
         return [
@@ -32,9 +35,23 @@ class FournisseurController extends AbstractController
     }
 
     #[Route('', name: 'list', methods: ['GET'])]
-    public function list(FournisseurRepository $repo): JsonResponse
+    public function list(FournisseurRepository $repo, Request $request, EntityManagerInterface $em): JsonResponse
     {
-        return $this->json(array_map(fn($f) => $this->serialize($f), $repo->findAll()));
+        $page   = $this->getPageParam($request);
+        $search = trim((string) $request->query->get('search', ''));
+
+        $qb = $em->createQueryBuilder()
+            ->select('f')
+            ->from(Fournisseur::class, 'f')
+            ->orderBy('f.raisonSociale', 'ASC');
+
+        if ($search) {
+            $qb->where('f.raisonSociale LIKE :s OR f.nom LIKE :s OR f.telephone LIKE :s OR f.email LIKE :s')
+               ->setParameter('s', "%$search%");
+        }
+
+        [$items, $total] = $this->paginateQb($qb, $page);
+        return $this->json(['data' => array_map(fn($f) => $this->serialize($f), $items), 'meta' => $this->paginateMeta($total, $page)]);
     }
 
     #[Route('/{id}', name: 'show', methods: ['GET'])]
@@ -64,7 +81,7 @@ class FournisseurController extends AbstractController
         $em->persist($f);
         $em->flush();
 
-        return $this->json(['message' => 'Fournisseur créé', 'id' => $f->getId()], 201);
+        return $this->json($this->serialize($f), 201);
     }
 
     #[Route('/{id}', name: 'update', methods: ['PUT'])]
@@ -92,9 +109,9 @@ class FournisseurController extends AbstractController
     #[Route('/{id}', name: 'delete', methods: ['DELETE'])]
     public function delete(Fournisseur $fournisseur, EntityManagerInterface $em): JsonResponse
     {
-        $em->remove($fournisseur);
+        $fournisseur->setDeletedAt(new \DateTimeImmutable());
         $em->flush();
 
-        return $this->json(['message' => 'Fournisseur supprimé'], 204);
+        return $this->json(['message' => 'Fournisseur supprimé'], 200);
     }
 }

@@ -1,0 +1,77 @@
+[Thu Oct  1 16:28:21 2026] PHP 8.2.12 Development Server (http://localhost:8000) started
+[Thu Oct  1 16:28:23 2026] [::1]:55846 Accepted
+[Thu Oct  1 16:28:25 2026] [info] Matched route "app_api_voiture_list".
+[Thu Oct  1 16:28:25 2026] [debug] Checking for authenticator support.
+[Thu Oct  1 16:28:25 2026] [debug] Checking support on authenticator.
+[Thu Oct  1 16:28:25 2026] [debug] Authenticator does not support the request.
+[Thu Oct  1 16:28:26 2026] [debug] Notified event "debug.security.authorization.vote" to listener "Symfony\Bundle\SecurityBundle\EventListener\VoteListener::onVoterVote".
+[Thu Oct  1 16:28:26 2026] [debug] Notified event "debug.security.authorization.vote" to listener "Symfony\Bundle\SecurityBundle\EventListener\VoteListener::onVoterVote".
+[Thu Oct  1 16:28:26 2026] [debug] Notified event "kernel.request" to listener "Symfony\Component\HttpKernel\EventListener\DebugHandlersListener::configure".
+[Thu Oct  1 16:28:26 2026] [debug] Notified event "kernel.request" to listener "Symfony\Component\HttpKernel\EventListener\ValidateRequestListener::onKernelRequest".
+[Thu Oct  1 16:28:26 2026] [debug] Notified event "kernel.request" to listener "Nelmio\CorsBundle\EventListener\CorsListener::onKernelRequest".
+[Thu Oct  1 16:28:26 2026] [debug] Notified event "kernel.request" to listener "Symfony\Bridge\Doctrine\Middleware\IdleConnection\Listener::onKernelRequest".
+[Thu Oct  1 16:28:26 2026] [debug] Notified event "kernel.request" to listener "Symfony\Component\HttpKernel\EventListener\SessionListener::onKernelRequest".
+[Thu Oct  1 16:28:26 2026] [debug] Notified event "kernel.request" to listener "Symfony\Component\HttpKernel\EventListener\LocaleListener::setDefaultLocale".
+[Thu Oct  1 16:28:26 2026] [debug] Notified event "kernel.request" to listener "Symfony\Component\HttpKernel\EventListener\RouterListener::onKernelRequest".
+[Thu Oct  1 16:28:26 2026] [debug] Notified event "kernel.request" to listener "Symfony\Component\HttpKernel\EventListener\LocaleListener::onKernelRequest".
+[Thu Oct  1 16:28:26 2026] [debug] Notified event "kernel.request" to listener "Symfony\Component\HttpKernel\EventListener\LocaleAwareListener::onKernelRequest".
+[Thu Oct  1 16:28:26 2026] [debug] Notified event "kernel.request" to listener "Symfony\Bundle\SecurityBundle\Debug\TraceableFirewallListener::configureLogoutUrlGenerator".
+[Thu Oct  1 16:28:26 2026] [debug] Notified event "kernel.request" to listener "Symfony\Bundle\SecurityBundle\Debug\TraceableFirewallListener::onKernelRequest".
+[Thu Oct  1 16:28:26 2026] [debug] Notified event "kernel.exception" to listener "App\EventSubscriber\LifecycleExceptionSubscriber::onException".
+[Thu Oct  1 16:28:26 2026] [debug] Notified event "kernel.exception" to listener "App\EventSubscriber\ApiExceptionSubscriber::onException".
+[Thu Oct  1 16:28:26 2026] [debug] Listener "App\EventSubscriber\ApiExceptionSubscriber::onException" stopped propagation of the event "kernel.exception".
+[Thu Oct  1 16:28:26 2026] [debug] Listener "Symfony\Component\Security\Http\Firewall\ExceptionListener::onKernelException" was not called for event "kernel.exception".
+[Thu Oct  1 16:28:26 2026] [debug] Listener "Symfony\Component\HttpKernel\EventListener\ErrorListener::logKernelException" was not called for event "kernel.exception".
+[Thu Oct  1 16:28:26 2026] [debug] Listener "Symfony\Component\HttpKernel\EventListener\RouterListener::onKernelException" was not called for event "kernel.exception".
+[Thu Oct  1 16:28:26 2026] [debug] Listener "Symfony\Component\HttpKernel\EventListener\ErrorListener::onKernelException" was not called for event "kernel.exception".
+[Thu Oct  1 16:28:26 2026] [debug] Notified event "kernel.response" to listener "Nelmio\CorsBundle\EventListener\CorsListener::onKernelResponse".
+[Thu Oct  1 16:28:26 2026] [debug] Notified event "kernel.response" to listener "Symfony\Component\HttpKernel\EventListener\ResponseListener::onKernelResponse".
+[Thu Oct  1 16:28:26 2026] [debug] Notified event "kernel.response" to listener "Symfony\Component\HttpKernel\EventListener\CacheAttributeListener::onKernelResponse".
+[Thu Oct  1 16:28:26 2026] [debug] Notified event "kernel.response" to listener "Nelmio\CorsBundle\EventListener\CacheableResponseVaryListener::onResponse".
+[Thu Oct  1 16:28:26 2026] [debug] Notified event "kernel.response" to listener "Symfony\Component\HttpKernel\EventListener\ErrorListener::removeCspHeader".
+[Thu Oct  1 16:28:26 2026] [debug] Notified event "kernel.response" to listener "Symfony\Component\HttpKernel\EventListener\DisallowRobotsIndexingListener::onResponse".
+[Thu Oct  1 16:28:26 2026] [debug] Notified event "kernel.response" to listener "Symfony\Component\HttpKernel\EventListener\SessionListener::onKernelResponse".
+[Thu Oct  1 16:28:26 2026] [debug] Notified event "kernel.finish_request" to listener "Symfony\Component\HttpKernel\EventListener\LocaleListener::onKernelFinishRequest".
+[Thu Oct  1 16:28:26 2026] [debug] Notified event "kernel.finish_request" to listener "Symfony\Component\HttpKernel\EventListener\RouterListener::onKernelFinishRequest".
+[Thu Oct  1 16:28:26 2026] [debug] Notified event "kernel.finish_request" to listener "Symfony\Bundle\SecurityBundle\Debug\TraceableFirewallListener::onKernelFinishRequest".
+[Thu Oct  1 16:28:26 2026] [debug] Notified event "kernel.finish_request" to listener "Symfony\Component\HttpKernel\EventListener\LocaleAwareListener::onKernelFinishRequest".
+[Thu Oct  1 16:28:26 2026] [::1]:55846 [403]: GET /api/voiture
+[Thu Oct  1 16:28:26 2026] [::1]:55846 Closing
+[Thu Oct  1 16:28:39 2026] [::1]:55858 Accepted
+[Thu Oct  1 16:28:39 2026] [info] Matched route "app_api_voiture_list".
+[Thu Oct  1 16:28:39 2026] [debug] Checking for authenticator support.
+[Thu Oct  1 16:28:39 2026] [debug] Checking support on authenticator.
+[Thu Oct  1 16:28:39 2026] [debug] Authenticator does not support the request.
+[Thu Oct  1 16:28:39 2026] [debug] Notified event "debug.security.authorization.vote" to listener "Symfony\Bundle\SecurityBundle\EventListener\VoteListener::onVoterVote".
+[Thu Oct  1 16:28:39 2026] [debug] Notified event "debug.security.authorization.vote" to listener "Symfony\Bundle\SecurityBundle\EventListener\VoteListener::onVoterVote".
+[Thu Oct  1 16:28:39 2026] [debug] Notified event "kernel.request" to listener "Symfony\Component\HttpKernel\EventListener\DebugHandlersListener::configure".
+[Thu Oct  1 16:28:39 2026] [debug] Notified event "kernel.request" to listener "Symfony\Component\HttpKernel\EventListener\ValidateRequestListener::onKernelRequest".
+[Thu Oct  1 16:28:39 2026] [debug] Notified event "kernel.request" to listener "Nelmio\CorsBundle\EventListener\CorsListener::onKernelRequest".
+[Thu Oct  1 16:28:39 2026] [debug] Notified event "kernel.request" to listener "Symfony\Bridge\Doctrine\Middleware\IdleConnection\Listener::onKernelRequest".
+[Thu Oct  1 16:28:39 2026] [debug] Notified event "kernel.request" to listener "Symfony\Component\HttpKernel\EventListener\SessionListener::onKernelRequest".
+[Thu Oct  1 16:28:39 2026] [debug] Notified event "kernel.request" to listener "Symfony\Component\HttpKernel\EventListener\LocaleListener::setDefaultLocale".
+[Thu Oct  1 16:28:39 2026] [debug] Notified event "kernel.request" to listener "Symfony\Component\HttpKernel\EventListener\RouterListener::onKernelRequest".
+[Thu Oct  1 16:28:39 2026] [debug] Notified event "kernel.request" to listener "Symfony\Component\HttpKernel\EventListener\LocaleListener::onKernelRequest".
+[Thu Oct  1 16:28:39 2026] [debug] Notified event "kernel.request" to listener "Symfony\Component\HttpKernel\EventListener\LocaleAwareListener::onKernelRequest".
+[Thu Oct  1 16:28:39 2026] [debug] Notified event "kernel.request" to listener "Symfony\Bundle\SecurityBundle\Debug\TraceableFirewallListener::configureLogoutUrlGenerator".
+[Thu Oct  1 16:28:39 2026] [debug] Notified event "kernel.request" to listener "Symfony\Bundle\SecurityBundle\Debug\TraceableFirewallListener::onKernelRequest".
+[Thu Oct  1 16:28:39 2026] [debug] Notified event "kernel.exception" to listener "App\EventSubscriber\LifecycleExceptionSubscriber::onException".
+[Thu Oct  1 16:28:39 2026] [debug] Notified event "kernel.exception" to listener "App\EventSubscriber\ApiExceptionSubscriber::onException".
+[Thu Oct  1 16:28:39 2026] [debug] Listener "App\EventSubscriber\ApiExceptionSubscriber::onException" stopped propagation of the event "kernel.exception".
+[Thu Oct  1 16:28:39 2026] [debug] Listener "Symfony\Component\Security\Http\Firewall\ExceptionListener::onKernelException" was not called for event "kernel.exception".
+[Thu Oct  1 16:28:39 2026] [debug] Listener "Symfony\Component\HttpKernel\EventListener\ErrorListener::logKernelException" was not called for event "kernel.exception".
+[Thu Oct  1 16:28:39 2026] [debug] Listener "Symfony\Component\HttpKernel\EventListener\RouterListener::onKernelException" was not called for event "kernel.exception".
+[Thu Oct  1 16:28:39 2026] [debug] Listener "Symfony\Component\HttpKernel\EventListener\ErrorListener::onKernelException" was not called for event "kernel.exception".
+[Thu Oct  1 16:28:39 2026] [debug] Notified event "kernel.response" to listener "Nelmio\CorsBundle\EventListener\CorsListener::onKernelResponse".
+[Thu Oct  1 16:28:39 2026] [debug] Notified event "kernel.response" to listener "Symfony\Component\HttpKernel\EventListener\ResponseListener::onKernelResponse".
+[Thu Oct  1 16:28:39 2026] [debug] Notified event "kernel.response" to listener "Symfony\Component\HttpKernel\EventListener\CacheAttributeListener::onKernelResponse".
+[Thu Oct  1 16:28:39 2026] [debug] Notified event "kernel.response" to listener "Nelmio\CorsBundle\EventListener\CacheableResponseVaryListener::onResponse".
+[Thu Oct  1 16:28:39 2026] [debug] Notified event "kernel.response" to listener "Symfony\Component\HttpKernel\EventListener\ErrorListener::removeCspHeader".
+[Thu Oct  1 16:28:39 2026] [debug] Notified event "kernel.response" to listener "Symfony\Component\HttpKernel\EventListener\DisallowRobotsIndexingListener::onResponse".
+[Thu Oct  1 16:28:39 2026] [debug] Notified event "kernel.response" to listener "Symfony\Component\HttpKernel\EventListener\SessionListener::onKernelResponse".
+[Thu Oct  1 16:28:39 2026] [debug] Notified event "kernel.finish_request" to listener "Symfony\Component\HttpKernel\EventListener\LocaleListener::onKernelFinishRequest".
+[Thu Oct  1 16:28:39 2026] [debug] Notified event "kernel.finish_request" to listener "Symfony\Component\HttpKernel\EventListener\RouterListener::onKernelFinishRequest".
+[Thu Oct  1 16:28:39 2026] [debug] Notified event "kernel.finish_request" to listener "Symfony\Bundle\SecurityBundle\Debug\TraceableFirewallListener::onKernelFinishRequest".
+[Thu Oct  1 16:28:39 2026] [debug] Notified event "kernel.finish_request" to listener "Symfony\Component\HttpKernel\EventListener\LocaleAwareListener::onKernelFinishRequest".
+[Thu Oct  1 16:28:39 2026] [::1]:55858 [403]: GET /api/voiture
+[Thu Oct  1 16:28:39 2026] [::1]:55858 Closing

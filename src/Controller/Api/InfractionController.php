@@ -6,14 +6,21 @@ use App\Entity\Infraction;
 use App\Repository\InfractionRepository;
 use App\Repository\ReservationRepository;
 use Doctrine\ORM\EntityManagerInterface;
+use App\Trait\BureauAwareTrait;
+use App\Trait\PaginationTrait;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Annotation\Route;
+use Symfony\Component\Security\Http\Attribute\IsGranted;
 
 #[Route('/api/infraction', name: 'app_api_infraction_')]
+#[IsGranted('ROLE_USER')]
 class InfractionController extends AbstractController
 {
+    use BureauAwareTrait;
+    use PaginationTrait;
+
     private function serialize(Infraction $i): array
     {
         $res  = $i->getReservation();
@@ -37,9 +44,24 @@ class InfractionController extends AbstractController
     }
 
     #[Route('', name: 'list', methods: ['GET'])]
-    public function list(InfractionRepository $repo): JsonResponse
+    public function list(Request $request, EntityManagerInterface $em): JsonResponse
     {
-        return $this->json(array_map(fn($i) => $this->serialize($i), $repo->findAll()));
+        $bureauId = $this->getEffectiveBureauId();
+        $page     = $this->getPageParam($request);
+
+        $qb = $em->createQueryBuilder()
+            ->select('i')
+            ->from(\App\Entity\Infraction::class, 'i')
+            ->join('i.reservation', 'r')
+            ->join('r.voiture', 'v')
+            ->orderBy('i.dateSaisie', 'DESC');
+
+        if ($bureauId !== null) {
+            $qb->where('v.bureau = :bureauId')->setParameter('bureauId', $bureauId);
+        }
+
+        [$items, $total] = $this->paginateQb($qb, $page);
+        return $this->json(['data' => array_map(fn($i) => $this->serialize($i), $items), 'meta' => $this->paginateMeta($total, $page)]);
     }
 
     #[Route('/{id}', name: 'show', methods: ['GET'])]
@@ -101,9 +123,9 @@ class InfractionController extends AbstractController
     #[Route('/{id}', name: 'delete', methods: ['DELETE'])]
     public function delete(Infraction $infraction, EntityManagerInterface $em): JsonResponse
     {
-        $em->remove($infraction);
+        $infraction->setDeletedAt(new \DateTimeImmutable());
         $em->flush();
 
-        return $this->json(['message' => 'Infraction supprimée'], 204);
+        return $this->json(['message' => 'Infraction supprimée'], 200);
     }
 }

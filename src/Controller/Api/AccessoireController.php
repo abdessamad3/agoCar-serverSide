@@ -5,6 +5,7 @@ namespace App\Controller\Api;
 use App\Entity\Accessoire;
 use App\Repository\AccessoireRepository;
 use Doctrine\ORM\EntityManagerInterface;
+use App\Trait\PaginationTrait;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -13,6 +14,8 @@ use Symfony\Component\Routing\Annotation\Route;
 #[Route('/api/accessoire', name: 'app_api_accessoire_')]
 class AccessoireController extends AbstractController
 {
+    use PaginationTrait;
+
     private function serialize(Accessoire $a): array
     {
         return [
@@ -26,9 +29,14 @@ class AccessoireController extends AbstractController
     }
 
     #[Route('', name: 'list', methods: ['GET'])]
-    public function list(AccessoireRepository $repo): JsonResponse
+    public function list(AccessoireRepository $repo, Request $request): JsonResponse
     {
-        return $this->json(array_map(fn($a) => $this->serialize($a), $repo->findAll()));
+        $page = $this->getPageParam($request);
+        $qb   = $repo->createQueryBuilder('a')
+            ->where('a.deletedAt IS NULL')
+            ->orderBy('a.id', 'DESC');
+        [$items, $total] = $this->paginateQb($qb, $page);
+        return $this->json(['data' => array_map(fn($a) => $this->serialize($a), $items), 'meta' => $this->paginateMeta($total, $page)]);
     }
 
     #[Route('/{id}', name: 'show', methods: ['GET'])]
@@ -71,9 +79,9 @@ class AccessoireController extends AbstractController
     #[Route('/{id}', name: 'delete', methods: ['DELETE'])]
     public function delete(Accessoire $accessoire, EntityManagerInterface $em): JsonResponse
     {
-        $em->remove($accessoire);
+        $accessoire->setDeletedAt(new \DateTimeImmutable());
         $em->flush();
 
-        return $this->json(['message' => 'Accessoire supprimé'], 204);
+        return $this->json(['message' => 'Accessoire supprimé'], 200);
     }
 }

@@ -17,11 +17,11 @@ class Assurance
     #[ORM\JoinColumn(nullable: false)]
     private ?Depense $depense = null;
 
-    #[ORM\Column(type: 'datetime_immutable')]
-    private ?\DateTimeImmutable $dateDebut = null;
+    #[ORM\Column(length: 100, nullable: true)]
+    private ?string $compagnie = null;
 
-    #[ORM\Column(type: 'datetime_immutable')]
-    private ?\DateTimeImmutable $dateFin = null;
+    #[ORM\Column(length: 50, nullable: true)]
+    private ?string $typeAssurance = null;
 
     #[ORM\Column(length: 50, nullable: true)]
     private ?string $numeroContrat = null;
@@ -35,13 +35,29 @@ class Assurance
     #[ORM\Column(type: 'datetime_immutable', nullable: true)]
     private ?\DateTimeImmutable $editAu = null;
 
+    #[ORM\Column(type: 'datetime_immutable', nullable: true)]
+    private ?\DateTimeImmutable $deletedAt = null;
+
+    #[ORM\Column(type: 'datetime_immutable', nullable: true)]
+    private ?\DateTimeImmutable $archivedAt = null;
+
+    #[ORM\Column(length: 512, nullable: true)]
+    private ?string $filePath = null;
+
+    #[ORM\Column(type: 'text', nullable: true)]
+    private ?string $notes = null;
+
+    /** Policy was explicitly voided/cancelled (distinct from archivedAt, which means "superseded by a renewal"). */
+    #[ORM\Column(type: 'datetime_immutable', nullable: true)]
+    private ?\DateTimeImmutable $cancelledAt = null;
+
     public function getId(): ?int { return $this->id; }
     public function getDepense(): ?Depense { return $this->depense; }
     public function setDepense(?Depense $depense): static { $this->depense = $depense; return $this; }
-    public function getDateDebut(): ?\DateTimeImmutable { return $this->dateDebut; }
-    public function setDateDebut(\DateTimeImmutable $dateDebut): static { $this->dateDebut = $dateDebut; return $this; }
-    public function getDateFin(): ?\DateTimeImmutable { return $this->dateFin; }
-    public function setDateFin(\DateTimeImmutable $dateFin): static { $this->dateFin = $dateFin; return $this; }
+    public function getCompagnie(): ?string { return $this->compagnie; }
+    public function setCompagnie(?string $compagnie): static { $this->compagnie = $compagnie; return $this; }
+    public function getTypeAssurance(): ?string { return $this->typeAssurance; }
+    public function setTypeAssurance(?string $typeAssurance): static { $this->typeAssurance = $typeAssurance; return $this; }
     public function getNumeroContrat(): ?string { return $this->numeroContrat; }
     public function setNumeroContrat(?string $numeroContrat): static { $this->numeroContrat = $numeroContrat; return $this; }
     public function getCreePar(): ?Utilisateur { return $this->creePar; }
@@ -50,4 +66,14 @@ class Assurance
     public function setCreeAu(?\DateTimeImmutable $creeAu): static { $this->creeAu = $creeAu; return $this; }
     public function getEditAu(): ?\DateTimeImmutable { return $this->editAu; }
     public function setEditAu(?\DateTimeImmutable $editAu): static { $this->editAu = $editAu; return $this; }
+    public function getDeletedAt(): ?\DateTimeImmutable { return $this->deletedAt; }
+    public function setDeletedAt(?\DateTimeImmutable $deletedAt): static { $this->deletedAt = $deletedAt; return $this; }
+    public function getArchivedAt(): ?\DateTimeImmutable { return $this->archivedAt; }
+    public function setArchivedAt(?\DateTimeImmutable $archivedAt): static { $this->archivedAt = $archivedAt; return $this; }
+    public function getFilePath(): ?string { return $this->filePath; }
+    public function setFilePath(?string $filePath): static { $this->filePath = $filePath; return $this; }
+    public function getNotes(): ?string { return $this->notes; }
+    public function setNotes(?string $notes): static { $this->notes = $notes; return $this; }
+    public function getCancelledAt(): ?\DateTimeImmutable { return $this->cancelledAt; }
+    public function setCancelledAt(?\DateTimeImmutable $cancelledAt): static { $this->cancelledAt = $cancelledAt; return $this; }
 }

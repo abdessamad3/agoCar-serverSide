@@ -27,6 +27,9 @@ class Accessoire
     #[ORM\Column(type: 'datetime_immutable')]
     private ?\DateTimeImmutable $creeAu = null;
 
+    #[ORM\Column(type: 'datetime_immutable', nullable: true)]
+    private ?\DateTimeImmutable $deletedAt = null;
+
     /**
      * Bidirectional many-to-many: Accessoire is the INVERSE side
      * Reservation is the OWNING side (inversedBy on Reservation)
@@ -87,6 +90,9 @@ class Accessoire
         $this->creeAu = $creeAu;
         return $this;
     }
+
+    public function getDeletedAt(): ?\DateTimeImmutable { return $this->deletedAt; }
+    public function setDeletedAt(?\DateTimeImmutable $deletedAt): static { $this->deletedAt = $deletedAt; return $this; }
 
     /**
      * @return Collection<int, Reservation>

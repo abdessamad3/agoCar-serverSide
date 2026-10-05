@@ -5,8 +5,11 @@ framework:
     # Note that the session will be started ONLY if you read or write from it.
     session: true
 
-    #esi: true
-    #fragments: true
+    rate_limiter:
+        login:
+            policy: fixed_window
+            limit: 5
+            interval: '1 minute'
 
 when@test:
     framework:

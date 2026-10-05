@@ -11,6 +11,8 @@ use Symfony\Component\HttpFoundation\File\File;
 use Symfony\Component\HttpFoundation\File\UploadedFile;
 
 #[ORM\Entity(repositoryClass: VoitureRepository::class)]
+#[ORM\Index(columns: ['voiture_status'], name: 'idx_voiture_status')]
+#[ORM\Index(columns: ['bureau_id'],      name: 'IDX_E9E2810F32516FE2')]
 #[Vich\Uploadable]
 class Voiture
 {
@@ -123,6 +125,9 @@ class Voiture
     #[ORM\Column(type: 'datetime_immutable', nullable: true)]
     private ?\DateTimeImmutable $editAu = null;
 
+    #[ORM\Column(type: 'datetime_immutable', nullable: true)]
+    private ?\DateTimeImmutable $deletedAt = null;
+
     #[ORM\OneToMany(mappedBy: 'voiture', targetEntity: Depense::class)]
     private Collection $depenses;
 
@@ -191,6 +196,8 @@ class Voiture
     public function setCreeAu(?\DateTimeImmutable $creeAu): static { $this->creeAu = $creeAu; return $this; }
     public function getEditAu(): ?\DateTimeImmutable { return $this->editAu; }
     public function setEditAu(?\DateTimeImmutable $editAu): static { $this->editAu = $editAu; return $this; }
+    public function getDeletedAt(): ?\DateTimeImmutable { return $this->deletedAt; }
+    public function setDeletedAt(?\DateTimeImmutable $deletedAt): static { $this->deletedAt = $deletedAt; return $this; }
     public function getDepenses(): Collection { return $this->depenses; }
     public function getImages(): Collection   { return $this->images; }
 

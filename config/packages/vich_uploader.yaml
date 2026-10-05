@@ -6,3 +6,15 @@ vich_uploader:
             uri_prefix: /uploads/cars
             upload_destination: '%kernel.project_dir%/public/uploads/cars'
             namer: vich_uploader.namer_uniqid
+        logo_image:
+            uri_prefix: /uploads/logos
+            upload_destination: '%kernel.project_dir%/public/uploads/logos'
+            namer: vich_uploader.namer_uniqid
+        client_document:
+            uri_prefix: /uploads/client-documents
+            upload_destination: '%kernel.project_dir%/public/uploads/client-documents'
+            namer: vich_uploader.namer_uniqid
+        depense_document:
+            uri_prefix: /uploads/depense-documents
+            upload_destination: '%kernel.project_dir%/public/uploads/depense-documents'
+            namer: vich_uploader.namer_uniqid

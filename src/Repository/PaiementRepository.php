@@ -16,6 +16,34 @@ class PaiementRepository extends ServiceEntityRepository
         parent::__construct($registry, Paiement::class);
     }
 
+    public function countByReservation(int $reservationId): int
+    {
+        return (int) $this->createQueryBuilder('p')
+            ->select('COUNT(p.id)')
+            ->where('p.reservation = :reservationId')
+            ->andWhere('p.deletedAt IS NULL')
+            ->setParameter('reservationId', $reservationId)
+            ->getQuery()
+            ->getSingleScalarResult();
+    }
+
+    /** Most recent payment date across all of a client's reservations, for the Client
+     *  Detail financial summary. */
+    public function getLastPaymentDate(int $clientId): ?\DateTimeImmutable
+    {
+        $date = $this->createQueryBuilder('p')
+            ->select('p.datePaiement')
+            ->join('p.reservation', 'r')
+            ->where('r.client = :clientId')
+            ->andWhere('p.deletedAt IS NULL')
+            ->orderBy('p.datePaiement', 'DESC')
+            ->setParameter('clientId', $clientId)
+            ->setMaxResults(1)
+            ->getQuery()->getOneOrNullResult();
+
+        return $date ? $date['datePaiement'] : null;
+    }
+
 //    /**
 //     * @return Paiement[] Returns an array of Paiement objects
 //     */

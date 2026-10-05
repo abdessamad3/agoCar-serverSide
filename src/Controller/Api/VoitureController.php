@@ -4,6 +4,12 @@ namespace App\Controller\Api;
 
 use App\Entity\Voiture;
 use App\Entity\VoitureImage;
+use App\Entity\Reservation;
+use App\Entity\Depense;
+use App\Entity\Assurance;
+use App\Entity\Vignette;
+use App\Entity\SuiviTechnique;
+use App\Entity\Vidange;
 use App\Repository\VoitureRepository;
 use App\Repository\BureauRepository;
 use Doctrine\ORM\EntityManagerInterface;
@@ -13,12 +19,65 @@ use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Annotation\Route;
 use Symfony\Component\Security\Http\Attribute\IsGranted;
 use Symfony\Component\HttpKernel\KernelInterface;
+use App\Entity\User;
+use App\Fleet\FleetLifecycleManager;
+use App\Fleet\Event\DecommissionInitiated;
+use App\Fleet\Event\TemporalSyncTriggered;
+use App\Fleet\Event\VehicleSetupStarted;
+use App\Fleet\Exception\InvalidTransitionException;
+use App\Fleet\Exception\LifecycleViolationException;
+use App\Doctrine\VoitureStatusWriteGuard;
+use App\Service\ActivityLogService;
+use App\Service\ComplianceService;
+use App\Service\OilChangeService;
+use App\Service\VoitureStatusService;
+use App\Trait\BureauAwareTrait;
 
 #[Route('/api/voiture', name: 'app_api_voiture_')]
 #[IsGranted('ROLE_USER')]
 class VoitureController extends AbstractController
 {
-    public function __construct(private KernelInterface $kernel) {}
+    use BureauAwareTrait;
+
+    public function __construct(
+        private KernelInterface          $kernel,
+        private ComplianceService        $complianceService,
+        private OilChangeService         $oilChangeService,
+        private VoitureStatusService     $statusService,
+        private ActivityLogService       $activityLog,
+        private FleetLifecycleManager    $flm,
+        private VoitureStatusWriteGuard  $guard,
+    ) {}
+
+    private function snapshotVoiture(Voiture $v): array
+    {
+        return [
+            'marque'                  => $v->getMarque(),
+            'modele'                  => $v->getModele(),
+            'version'                 => $v->getVersion(),
+            'annee'                   => $v->getAnnee(),
+            'immatriculation'         => $v->getImmatriculation(),
+            'vin'                     => $v->getVin(),
+            'typeCarburant'           => $v->getTypeCarburant(),
+            'transmission'            => $v->getTransmission(),
+            'couleur'                 => $v->getCouleur(),
+            'places'                  => $v->getPlaces(),
+            'portes'                  => $v->getPortes(),
+            'puissanceCv'             => $v->getPuissanceCv(),
+            'categorie'               => $v->getCategorie(),
+            'kilometrageActuel'       => $v->getKilometrageActuel(),
+            'climatisation'           => $v->isClimatisation(),
+            'prixJour'                => $v->getPrixJour(),
+            'prixSemaine'             => $v->getPrixSemaine(),
+            'prixMois'                => $v->getPrixMois(),
+            'prixAchat'               => $v->getPrixAchat(),
+            'dateAchat'               => $v->getDateAchat()?->format('Y-m-d'),
+            'dateExpirationAssurance' => $v->getDateExpirationAssurance()?->format('Y-m-d'),
+            'dateExpirationVignette'  => $v->getDateExpirationVignette()?->format('Y-m-d'),
+            'dateExpirationVisite'    => $v->getDateExpirationVisite()?->format('Y-m-d'),
+            'voitureStatus'           => $v->getVoitureStatus(),
+        ];
+    }
 
     #[Route('', name: 'list', methods: ['GET'])]
     public function list(Request $request, VoitureRepository $repo): JsonResponse
@@ -26,7 +85,7 @@ class VoitureController extends AbstractController
         try {
             // 1. Get query parameters
             $page = (int) $request->query->get('page', 1);
-            $limit = (int) $request->query->get('limit', 10);
+            $limit = min(1000, max(1, (int) $request->query->get('limit', 20)));
             $search = $request->query->get('search', '');
             $voitureStatus = $request->query->get('voitureStatus', '');
             $typeCarburant = $request->query->get('typeCarburant', '');
@@ -34,19 +93,20 @@ class VoitureController extends AbstractController
             $direction = $request->query->get('direction', 'ASC');
             $dateDebutStr = $request->query->get('dateDebut', '');
             $dateFinStr   = $request->query->get('dateFin', '');
+            $bureauId     = $this->getEffectiveBureauId();
 
             // Validate pagination
             $page = max(1, $page);
-            $limit = min(100, max(1, $limit));
             $direction = in_array(strtoupper($direction), ['ASC', 'DESC']) ? strtoupper($direction) : 'ASC';
 
             // 2. Build filters array
             $filters = [
-                'search' => $search,
+                'search'        => $search,
                 'voitureStatus' => $voitureStatus,
                 'typeCarburant' => $typeCarburant,
-                'sort' => $sort,
-                'direction' => $direction,
+                'sort'          => $sort,
+                'direction'     => $direction,
+                'bureauId'      => $bureauId ?: null,
             ];
 
             // 3. Get voitures and total count
@@ -68,7 +128,12 @@ class VoitureController extends AbstractController
                 } catch (\Exception) {}
             }
 
-            // 4. Format response
+            // 4. Compute effective statuses + compliance + oil change in bulk
+            $statusMap     = $this->statusService->computeStatusBulk($voitures);
+            $complianceMap = $this->complianceService->getComplianceStatusBulk($voitures);
+            $oilMap        = $this->oilChangeService->getOilStatusBulk($voitures);
+
+            // 5. Format response
             $data = array_map(fn($v) => [
                 'id'                       => $v->getId(),
                 'marque'                   => $v->getMarque(),
@@ -90,12 +155,12 @@ class VoitureController extends AbstractController
                 'prixSemaine'              => $v->getPrixSemaine(),
                 'prixMois'                 => $v->getPrixMois(),
                 'prixAchat'                => $v->getPrixAchat(),
-                'caution'                  => $v->getCaution(),
                 'dateAchat'                => $v->getDateAchat()?->format('Y-m-d'),
                 'dateExpirationAssurance'  => $v->getDateExpirationAssurance()?->format('Y-m-d'),
                 'dateExpirationVignette'   => $v->getDateExpirationVignette()?->format('Y-m-d'),
                 'dateExpirationVisite'     => $v->getDateExpirationVisite()?->format('Y-m-d'),
                 'voitureStatus'            => $v->getVoitureStatus(),
+                'effectiveStatus'          => $statusMap[$v->getId()] ?? $v->getVoitureStatus(),
                 'bureau'                   => $v->getBureau()?->getId(),
                 'image'                    => $v->getImagePath(),
                 'galleryImages'            => array_values(array_map(
@@ -105,15 +170,19 @@ class VoitureController extends AbstractController
                 'availabilityForPeriod'    => $datesActive
                     ? (in_array($v->getId(), $bookedIds) ? 'reservee' : 'disponible')
                     : null,
+                'compliance'               => $complianceMap[$v->getId()] ?? $this->complianceService->getComplianceStatus($v),
+                'oilChange'                => $oilMap[$v->getId()] ?? $this->oilChangeService->getOilStatus($v),
             ], $voitures);
 
             return $this->json([
                 'data' => $data,
                 'meta' => [
-                    'page' => $page,
-                    'limit' => $limit,
-                    'total' => $total,
-                    'pages' => (int) $pages,
+                    'total'       => $total,
+                    'page'        => $page,
+                    'limit'       => $limit,
+                    'totalPages'  => (int) ceil($total / $limit) ?: 1,
+                    'hasNextPage' => $page < ((int) ceil($total / $limit) ?: 1),
+                    'hasPrevPage' => $page > 1,
                 ]
             ]);
         } catch (\Exception $e) {
@@ -149,12 +218,12 @@ class VoitureController extends AbstractController
                 'prixSemaine'              => $voiture->getPrixSemaine(),
                 'prixMois'                 => $voiture->getPrixMois(),
                 'prixAchat'                => $voiture->getPrixAchat(),
-                'caution'                  => $voiture->getCaution(),
                 'dateAchat'                => $voiture->getDateAchat()?->format('Y-m-d'),
                 'dateExpirationAssurance'  => $voiture->getDateExpirationAssurance()?->format('Y-m-d'),
                 'dateExpirationVignette'   => $voiture->getDateExpirationVignette()?->format('Y-m-d'),
                 'dateExpirationVisite'     => $voiture->getDateExpirationVisite()?->format('Y-m-d'),
                 'voitureStatus'            => $voiture->getVoitureStatus(),
+                'effectiveStatus'          => $this->statusService->computeStatus($voiture),
                 'bureau'                   => $voiture->getBureau()?->getId(),
                 'creePar'                  => $voiture->getCreePar()?->getId(),
                 'creeAu'                   => $voiture->getCreeAu()?->format('Y-m-d H:i:s'),
@@ -168,6 +237,8 @@ class VoitureController extends AbstractController
                     fn($img) => ['id' => $img->getId(), 'path' => $img->getImagePath()],
                     $voiture->getImages()->toArray()
                 )),
+                'compliance'               => $this->complianceService->getComplianceStatus($voiture),
+                'oilChange'                => $this->oilChangeService->getOilStatus($voiture),
             ]);
         } catch (\Exception $e) {
             return $this->json([
@@ -178,6 +249,7 @@ class VoitureController extends AbstractController
     }
 
     #[Route('', name: 'create', methods: ['POST'])]
+    #[IsGranted('ROLE_ADMIN')]
     public function create(
         Request $request,
         EntityManagerInterface $em,
@@ -209,7 +281,6 @@ class VoitureController extends AbstractController
             $voiture->setPrixSemaine($request->request->get('prixSemaine') ?: null);
             $voiture->setPrixMois($request->request->get('prixMois') ?: null);
             $voiture->setPrixAchat($request->request->get('prixAchat') ?: null);
-            $voiture->setCaution($request->request->get('caution') ?: null);
 
             $toDate = fn(?string $s) => $s ? new \DateTimeImmutable($s) : null;
             $voiture->setDateAchat($toDate($request->request->get('dateAchat')));
@@ -217,7 +288,7 @@ class VoitureController extends AbstractController
             $voiture->setDateExpirationVignette($toDate($request->request->get('dateExpirationVignette')));
             $voiture->setDateExpirationVisite($toDate($request->request->get('dateExpirationVisite')));
 
-            $voiture->setVoitureStatus($request->request->get('voitureStatus', 'disponible'));
+            $voiture->setVoitureStatus($request->request->get('voitureStatus', 'brouillon'));
             $voiture->setReservationStatus($request->request->get('reservationStatus', 'confirmed'));
             
             $voiture->setCreeAu(new \DateTimeImmutable());
@@ -228,6 +299,8 @@ class VoitureController extends AbstractController
 
             if ($user->getBureau()) {
                 $voiture->setBureau($user->getBureau());
+            } elseif ($managerBureau = $bureauRepo->findOneBy(['manager' => $user])) {
+                $voiture->setBureau($managerBureau);
             } elseif ($request->request->get('bureauId')) {
                 $bureau = $bureauRepo->find((int) $request->request->get('bureauId'));
                 if (!$bureau) {
@@ -257,6 +330,8 @@ class VoitureController extends AbstractController
             // 4. Save main record
             $em->persist($voiture);
             $em->flush();
+
+            $this->activityLog->logCreate('Voiture', $voiture->getId(), $this->snapshotVoiture($voiture), $voiture->getBureau());
 
             // 5. Handle additional images
             $additionalFiles = $request->files->get('additionalImages', []);
@@ -292,10 +367,12 @@ class VoitureController extends AbstractController
     }
 
     #[Route('/{id}', name: 'update', methods: ['PUT'])]
+    #[IsGranted('ROLE_ADMIN')]
     public function update(Voiture $voiture, Request $request, EntityManagerInterface $em): JsonResponse
     {
         try {
-            $data = json_decode($request->getContent(), true);
+            $data    = json_decode($request->getContent(), true);
+            $oldSnap = $this->snapshotVoiture($voiture);
 
             if (isset($data['marque']))                   $voiture->setMarque($data['marque']);
             if (isset($data['modele']))                   $voiture->setModele($data['modele']);
@@ -316,7 +393,6 @@ class VoitureController extends AbstractController
             if (array_key_exists('prixSemaine', $data))   $voiture->setPrixSemaine($data['prixSemaine'] ?: null);
             if (array_key_exists('prixMois', $data))      $voiture->setPrixMois($data['prixMois'] ?: null);
             if (array_key_exists('prixAchat', $data))     $voiture->setPrixAchat($data['prixAchat'] ?: null);
-            if (array_key_exists('caution', $data))       $voiture->setCaution($data['caution'] ?: null);
             $toDate = fn(?string $s) => $s ? new \DateTimeImmutable($s) : null;
             if (array_key_exists('dateAchat', $data))               $voiture->setDateAchat($toDate($data['dateAchat']));
             if (array_key_exists('dateExpirationAssurance', $data))  $voiture->setDateExpirationAssurance($toDate($data['dateExpirationAssurance']));
@@ -326,7 +402,15 @@ class VoitureController extends AbstractController
             if (isset($data['reservationStatus']))        $voiture->setReservationStatus($data['reservationStatus']);
             $voiture->setEditAu(new \DateTimeImmutable());
 
-            $em->flush();
+            $this->guard->activate();
+            try {
+                $em->flush();
+            } finally {
+                $this->guard->deactivate();
+            }
+
+            $this->activityLog->logUpdate('Voiture', $voiture->getId(), $oldSnap, $this->snapshotVoiture($voiture), $voiture->getBureau());
+            $this->statusService->syncStatus($voiture);
 
             return $this->json(['message' => 'Voiture mise à jour']);
         } catch (\Exception $e) {
@@ -338,6 +422,7 @@ class VoitureController extends AbstractController
     }
 
     #[Route('/{id}/images', name: 'add_image', methods: ['POST'])]
+    #[IsGranted('ROLE_ADMIN')]
     public function addImage(Voiture $voiture, Request $request, EntityManagerInterface $em): JsonResponse
     {
         try {
@@ -370,6 +455,7 @@ class VoitureController extends AbstractController
     }
 
     #[Route('/{voitureId}/images/{imageId}', name: 'delete_image', methods: ['DELETE'])]
+    #[IsGranted('ROLE_ADMIN')]
     public function deleteImage(int $voitureId, int $imageId, EntityManagerInterface $em): JsonResponse
     {
         try {
@@ -389,6 +475,7 @@ class VoitureController extends AbstractController
     }
 
     #[Route('/{id}/image', name: 'update_image', methods: ['POST'])]
+    #[IsGranted('ROLE_ADMIN')]
     public function updateImage(Voiture $voiture, Request $request, EntityManagerInterface $em): JsonResponse
     {
         try {
@@ -415,12 +502,248 @@ class VoitureController extends AbstractController
         }
     }
 
+    #[Route('/{id}/financial-summary', name: 'financial_summary', methods: ['GET'])]
+    public function financialSummary(Voiture $voiture, EntityManagerInterface $em): JsonResponse
+    {
+        try {
+            $reservations = $em->createQueryBuilder()
+                ->select('r')->from(Reservation::class, 'r')
+                ->where('r.voiture = :v')->andWhere('r.deletedAt IS NULL')
+                ->setParameter('v', $voiture)->getQuery()->getResult();
+
+            $totalIncome = array_sum(array_map(fn($r) => (float)($r->getTotal() ?? 0), $reservations));
+
+            $depenses = $em->createQueryBuilder()
+                ->select('d')->from(Depense::class, 'd')
+                ->where('d.voiture = :v')->andWhere('d.deletedAt IS NULL')
+                ->setParameter('v', $voiture)->getQuery()->getResult();
+
+            $totalExpenses = array_sum(array_map(fn($d) => (float)($d->getMontant() ?? 0), $depenses));
+            $netProfit = $totalIncome - $totalExpenses;
+
+            $dateAchat = $voiture->getDateAchat();
+            $today = new \DateTimeImmutable();
+            $daysSince = $dateAchat ? max(1, $today->diff($dateAchat)->days) : 365;
+            $rentedDays = array_sum(array_map(
+                fn($r) => ($r->getDateDebut() && $r->getDateFin()) ? max(1, $r->getDateFin()->diff($r->getDateDebut())->days) : 0,
+                $reservations
+            ));
+            $occupancyRate = round(min(100, $rentedDays / $daysSince * 100), 1);
+
+            $breakdownMap = [];
+            foreach ($depenses as $dep) {
+                $type = $dep->getTypeDepense() ?? 'autre';
+                if (!isset($breakdownMap[$type])) $breakdownMap[$type] = ['category' => $type, 'total' => 0.0, 'count' => 0];
+                $breakdownMap[$type]['total'] = round($breakdownMap[$type]['total'] + (float)($dep->getMontant() ?? 0), 2);
+                $breakdownMap[$type]['count']++;
+            }
+
+            $monthly = [];
+            for ($i = 5; $i >= 0; $i--) {
+                $d = $today->modify("-$i months");
+                $key = $d->format('Y-m');
+                $monthly[$key] = ['month' => $d->format('M Y'), 'key' => $key, 'income' => 0.0, 'expenses' => 0.0];
+            }
+            foreach ($reservations as $r) {
+                $key = $r->getDateDebut()?->format('Y-m');
+                if ($key && isset($monthly[$key])) $monthly[$key]['income'] = round($monthly[$key]['income'] + (float)($r->getTotal() ?? 0), 2);
+            }
+            foreach ($depenses as $d) {
+                $key = $d->getDateDebut()?->format('Y-m');
+                if ($key && isset($monthly[$key])) $monthly[$key]['expenses'] = round($monthly[$key]['expenses'] + (float)($d->getMontant() ?? 0), 2);
+            }
+
+            return $this->json([
+                'totalIncome'   => round($totalIncome, 2),
+                'totalExpenses' => round($totalExpenses, 2),
+                'netProfit'     => round($netProfit, 2),
+                'occupancyRate' => $occupancyRate,
+                'totalRentals'  => count($reservations),
+                'breakdown'     => array_values($breakdownMap),
+                'monthly'       => array_values($monthly),
+            ]);
+        } catch (\Exception $e) {
+            return $this->json(['error' => 'Failed to fetch financial summary', 'message' => $this->kernel->isDebug() ? $e->getMessage() : 'Erreur interne.'], 500);
+        }
+    }
+
+    #[Route('/{id}/transactions', name: 'transactions', methods: ['GET'])]
+    public function transactions(Voiture $voiture, Request $request, EntityManagerInterface $em): JsonResponse
+    {
+        try {
+            $typeF   = $request->query->get('type', '');
+            $fromF   = $request->query->get('from', '');
+            $toF     = $request->query->get('to', '');
+            $statusF = $request->query->get('status', '');
+
+            // Frontend sends specific category values (FIN_TX_TYPES), not a generic
+            // income/expense split. Map each category to: whether it's reservations,
+            // and which Depense.typeDepense value it corresponds to.
+            $depenseTypeMap = [
+                'reparation'     => 'reparation',
+                'assurance'      => 'assurance',
+                'vidange'        => 'vidange',
+                'vignette'       => 'vignette',
+                'suivitechnique' => 'suivi_technique',
+                'adblue'         => 'adblue',
+            ];
+            $includeReservations = !$typeF || $typeF === 'reservation';
+            $includeDepenses     = !$typeF || isset($depenseTypeMap[$typeF]);
+            $depenseTypeFilter   = $depenseTypeMap[$typeF] ?? null;
+
+            // Status filter uses generic paid/pending/cancelled buckets (the pills),
+            // but rows carry raw, source-specific status strings (reservationStatus in
+            // French, or Depense's StatusEnum). Normalize both sides before comparing —
+            // mirrors FinancialTabComponent.txStatusClass()'s grouping, extended to
+            // also cover impaye/partiel (otherwise unpaid/partial expenses matched
+            // nothing under "Pending").
+            $normalizeStatus = function (string $raw): string {
+                $s = strtolower($raw);
+                if (in_array($s, ['payee', 'paid', 'confirmed', 'confirmee', 'terminee', 'completed'], true)) return 'paid';
+                if (in_array($s, ['pending', 'en_attente', 'impaye', 'partiel'], true)) return 'pending';
+                if (in_array($s, ['annulee', 'cancelled', 'annule'], true)) return 'cancelled';
+                return 'other';
+            };
+
+            $rows = [];
+
+            if ($includeReservations) {
+                $reservations = $em->createQueryBuilder()->select('r')->from(Reservation::class, 'r')
+                    ->where('r.voiture = :v')->andWhere('r.deletedAt IS NULL')
+                    ->setParameter('v', $voiture)->getQuery()->getResult();
+                foreach ($reservations as $r) {
+                    $date = $r->getDateDebut()?->format('Y-m-d');
+                    $status = $r->getReservationStatus() ?? '';
+                    if ($fromF && $date && $date < $fromF) continue;
+                    if ($toF   && $date && $date > $toF)   continue;
+                    if ($statusF && $normalizeStatus($status) !== $statusF) continue;
+                    $rows[] = [
+                        'date'              => $date,
+                        'type'              => 'income',
+                        'direction'         => 'income',
+                        'category'          => 'reservation',
+                        'description'       => 'Réservation #' . $r->getId(),
+                        'amount'            => (float)($r->getTotal() ?? 0),
+                        'status'            => $status,
+                        'reservationStatus' => $status,
+                        'paymentStatus'     => $r->getPaymentStatus(),
+                    ];
+                }
+            }
+
+            if ($includeDepenses) {
+                $depenses = $em->createQueryBuilder()->select('d')->from(Depense::class, 'd')
+                    ->where('d.voiture = :v')->andWhere('d.deletedAt IS NULL')
+                    ->setParameter('v', $voiture)->getQuery()->getResult();
+
+                // Facture file lives on the type-specific wrapper entity, not on Depense
+                // itself — batch-fetch depenseId => filePath per wrapper type to avoid N+1.
+                $depenseIds = array_map(fn($d) => $d->getId(), $depenses);
+                $filePathByDepenseId = [];
+                if ($depenseIds) {
+                    foreach ([Assurance::class, Vignette::class, SuiviTechnique::class, Vidange::class] as $wrapperClass) {
+                        $wrapperRows = $em->createQueryBuilder()
+                            ->select('IDENTITY(w.depense) as depenseId, w.filePath')
+                            ->from($wrapperClass, 'w')
+                            ->where('w.depense IN (:ids)')->andWhere('w.filePath IS NOT NULL')
+                            ->setParameter('ids', $depenseIds)
+                            ->getQuery()->getArrayResult();
+                        foreach ($wrapperRows as $wr) {
+                            $filePathByDepenseId[(int) $wr['depenseId']] = $wr['filePath'];
+                        }
+                    }
+                }
+
+                foreach ($depenses as $d) {
+                    if ($depenseTypeFilter && $d->getTypeDepense() !== $depenseTypeFilter) continue;
+                    $date = $d->getDateDebut()?->format('Y-m-d');
+                    $status = $d->getStatut()?->value ?? '';
+                    if ($fromF   && $date && $date < $fromF)  continue;
+                    if ($toF     && $date && $date > $toF)    continue;
+                    if ($statusF && $normalizeStatus($status) !== $statusF) continue;
+                    $rows[] = [
+                        'date'        => $date,
+                        'type'        => 'expense',
+                        'direction'   => 'expense',
+                        'category'    => $d->getTypeDepense() ?? 'autre',
+                        'description' => $d->getDescription() ?: ($d->getTypeDepense() ?? 'Dépense'),
+                        'amount'      => (float)($d->getMontant() ?? 0),
+                        'status'      => $status,
+                        'filePath'    => $filePathByDepenseId[$d->getId()] ?? null,
+                        'depenseId'   => $d->getId(),
+                        'montantTotal' => (float)($d->getMontant() ?? 0),
+                        'montantPaye'  => (float)($d->getMontantPaye() ?? 0),
+                    ];
+                }
+            }
+
+            usort($rows, fn($a, $b) => strcmp($b['date'] ?? '', $a['date'] ?? ''));
+            return $this->json($rows);
+        } catch (\Exception $e) {
+            return $this->json(['error' => 'Failed to fetch transactions', 'message' => $this->kernel->isDebug() ? $e->getMessage() : 'Erreur interne.'], 500);
+        }
+    }
+
+    #[Route('/{id}/lifecycle', name: 'lifecycle', methods: ['POST'])]
+    public function lifecycle(Voiture $voiture, Request $request): JsonResponse
+    {
+        $data      = json_decode($request->getContent(), true) ?? [];
+        $eventName = $data['event'] ?? '';
+
+        try {
+            /** @var User|null $user */
+            $user = $this->getUser();
+
+            if ($eventName === 'vehicle.activated') {
+                $event = new TemporalSyncTriggered(
+                    $voiture->getId(),
+                    $voiture->getBureau()?->getId(),
+                );
+            } elseif ($eventName === 'vehicle.setup_started') {
+                $event = new VehicleSetupStarted($voiture->getId());
+            } elseif ($eventName === 'vehicle.decommission_initiated') {
+                $this->flm->assertCanInitiateDecommission($voiture);
+                $event = new DecommissionInitiated(
+                    $voiture->getId(),
+                    $user instanceof User ? $user->getId() : 0,
+                    $data['reason'] ?? null,
+                );
+            } else {
+                return $this->json(['error' => 'Unknown lifecycle event: ' . $eventName], 400);
+            }
+
+            $result = $this->flm->applyEvent($voiture, $event);
+
+            return $this->json([
+                'previousState' => $result->previousState->value,
+                'currentState'  => $result->currentState->value,
+                'stateChanged'  => $result->stateChanged,
+                'warnings'      => $result->warnings,
+                'effects'       => $result->postEffects,
+            ]);
+        } catch (LifecycleViolationException $e) {
+            return $this->json(['error' => $e->getMessage()], 422);
+        } catch (InvalidTransitionException $e) {
+            return $this->json(['error' => $e->getMessage()], 409);
+        } catch (\Exception $e) {
+            return $this->json([
+                'error'   => 'Lifecycle event failed',
+                'message' => $this->kernel->isDebug() ? $e->getMessage() : 'Une erreur interne est survenue.',
+            ], 500);
+        }
+    }
+
     #[Route('/{id}', name: 'delete', methods: ['DELETE'])]
+    #[IsGranted('ROLE_ADMIN')]
     public function delete(Voiture $voiture, EntityManagerInterface $em): JsonResponse
     {
         try {
-            $em->remove($voiture);
+            $snap = $this->snapshotVoiture($voiture);
+            $bureau = $voiture->getBureau();
+            $voiture->setDeletedAt(new \DateTimeImmutable());
             $em->flush();
+
+            $this->activityLog->logDelete('Voiture', $voiture->getId(), $snap, $bureau);
 
             return $this->json(['message' => 'Voiture supprimée'], 200);
         } catch (\Exception $e) {
@@ -429,5 +752,12 @@ class VoitureController extends AbstractController
                 'message' => $this->kernel->isDebug() ? $e->getMessage() : 'Une erreur interne est survenue.'
             ], 500);
         }
+    }
+
+    #[Route('/sync-statuses', name: 'sync_statuses', methods: ['POST'])]
+    public function syncStatuses(): JsonResponse
+    {
+        $changed = $this->statusService->syncAll();
+        return $this->json(['message' => "Status synced. $changed car(s) updated.", 'changed' => $changed]);
     }
 }

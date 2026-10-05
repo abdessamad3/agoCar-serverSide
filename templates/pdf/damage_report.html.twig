@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+    font-family: DejaVu Sans, Arial, sans-serif;
+    font-size: 11px;
+    color: #111827;
+    background: #fff;
+}
+
+/* ── Header ── */
+.doc-header {
+    background: #1e3a8a;
+    padding: 16px 28px;
+    margin-bottom: 0;
+}
+.header-table { width: 100%; border-collapse: collapse; }
+.brand-name { font-size: 20px; font-weight: bold; color: #ffffff; letter-spacing: 1px; }
+.brand-sub  { font-size: 9px; color: #93c5fd; letter-spacing: 2px; margin-top: 2px; }
+.doc-title  { font-size: 15px; font-weight: bold; color: #ffffff; text-align: right; }
+.doc-ref    { font-size: 9px; color: #bfdbfe; text-align: right; margin-top: 3px; }
+.doc-date   { font-size: 8.5px; color: #93c5fd; text-align: right; margin-top: 2px; }
+
+/* ── Accent bar ── */
+.accent-bar { height: 4px; background: #3b82f6; }
+
+/* ── Body ── */
+.body { padding: 18px 28px; }
+
+/* ── Section title ── */
+.section-title {
+    font-size: 8px;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: #1e3a8a;
+    border-bottom: 1.5px solid #dbeafe;
+    padding-bottom: 3px;
+    margin-bottom: 8px;
+    margin-top: 14px;
+}
+
+/* ── Info grid ── */
+.info-table { width: 100%; border-collapse: separate; border-spacing: 8px 0; margin-bottom: 4px; }
+.info-box {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 5px;
+    padding: 10px 12px;
+    vertical-align: top;
+    width: 50%;
+}
+.info-box-title { font-size: 8px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; color: #94a3b8; margin-bottom: 7px; }
+.info-row-table { width: 100%; border-collapse: collapse; }
+.info-row-table tr td { padding: 2px 0; font-size: 10.5px; }
+.info-lbl { color: #94a3b8; width: 48%; }
+.info-val { font-weight: 600; color: #111827; text-align: right; }
+
+/* ── Damage table ── */
+.dmg-table { width: 100%; border-collapse: collapse; margin-top: 4px; }
+.dmg-table thead tr { background: #f1f5f9; }
+.dmg-table thead th {
+    padding: 6px 8px;
+    text-align: left;
+    font-size: 8.5px;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: #374151;
+    border-bottom: 2px solid #e2e8f0;
+}
+.dmg-table thead th.right { text-align: right; }
+.dmg-table tbody tr { border-bottom: 1px solid #e2e8f0; }
+.dmg-table tbody tr:last-child { border-bottom: none; }
+.dmg-table tbody td { padding: 7px 8px; font-size: 10.5px; vertical-align: top; }
+.dmg-table tbody td.right { text-align: right; }
+
+/* severity stripe via left border on first td */
+.sev-scratch .stripe { border-left: 3px solid #f59e0b; }
+.sev-dent    .stripe { border-left: 3px solid #f97316; }
+.sev-crack   .stripe { border-left: 3px solid #dc2626; }
+.sev-broken  .stripe { border-left: 3px solid #7f1d1d; }
+.sev-repaired .stripe { border-left: 3px solid #16a34a; }
+
+.sev-label { font-size: 10px; font-weight: 500; color: #374151; }
+
+.badge {
+    display: inline;
+    padding: 2px 6px;
+    border-radius: 99px;
+    font-size: 8.5px;
+    font-weight: bold;
+}
+.badge-open     { background: #fef2f2; color: #dc2626; }
+.badge-repaired { background: #f0fdf4; color: #16a34a; }
+.badge-new      { background: #fff7ed; color: #c2410c; }
+
+.desc-text { color: #374151; font-size: 10px; line-height: 1.4; }
+.date-text { color: #94a3b8; font-size: 9.5px; white-space: nowrap; }
+
+/* ── Totals row ── */
+.totals-row {
+    background: #f1f5f9;
+    border-top: 2px solid #e2e8f0;
+    padding: 7px 8px;
+    text-align: right;
+}
+.totals-table { width: 100%; border-collapse: collapse; }
+.totals-table td { padding: 0 6px; font-size: 10px; }
+.total-lbl { color: #94a3b8; }
+.total-val { font-weight: bold; color: #111827; }
+.total-val-green  { font-weight: bold; color: #16a34a; }
+.total-val-red    { font-weight: bold; color: #dc2626; }
+.total-val-orange { font-weight: bold; color: #f97316; }
+
+/* ── Return condition ── */
+.cond-table { width: 100%; border-collapse: separate; border-spacing: 8px 0; }
+.cond-box {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 5px;
+    padding: 10px 12px;
+    vertical-align: top;
+    width: 33%;
+}
+.cond-label { font-size: 8px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; color: #94a3b8; margin-bottom: 5px; }
+.cond-value { font-size: 15px; font-weight: bold; color: #111827; }
+.cond-sub   { font-size: 9px; color: #94a3b8; margin-top: 3px; }
+
+/* fuel bar */
+.fuel-bar-bg { background: #e2e8f0; border-radius: 3px; height: 6px; width: 100%; margin-top: 4px; }
+.fuel-bar-fill { background: #16a34a; border-radius: 3px; height: 6px; }
+
+.cond-badge-minor { background: #fff7ed; color: #c2410c; border-radius: 99px; padding: 2px 8px; font-size: 9.5px; font-weight: bold; }
+.cond-badge-clean { background: #f0fdf4; color: #16a34a; border-radius: 99px; padding: 2px 8px; font-size: 9.5px; font-weight: bold; }
+.cond-badge-major { background: #fef2f2; color: #dc2626; border-radius: 99px; padding: 2px 8px; font-size: 9.5px; font-weight: bold; }
+
+/* ── Remarks ── */
+.remarks-box {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 5px;
+    padding: 10px 12px;
+    font-size: 10.5px;
+    color: #374151;
+    line-height: 1.6;
+    min-height: 40px;
+}
+
+/* ── Signatures ── */
+.sig-table { width: 100%; border-collapse: separate; border-spacing: 16px 0; margin-top: 4px; }
+.sig-box {
+    border: 1px solid #e2e8f0;
+    border-radius: 5px;
+    padding: 10px 12px;
+    vertical-align: top;
+    width: 50%;
+}
+.sig-title { font-size: 8px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; color: #94a3b8; margin-bottom: 36px; }
+.sig-line  { border-top: 1px solid #e2e8f0; margin-top: 4px; }
+.sig-name  { font-size: 9px; color: #94a3b8; margin-top: 4px; }
+
+/* ── Footer ── */
+.doc-footer {
+    background: #f8fafc;
+    border-top: 1px solid #e2e8f0;
+    padding: 7px 28px;
+    margin-top: 16px;
+}
+.footer-table { width: 100%; border-collapse: collapse; }
+.footer-left  { font-size: 8.5px; color: #94a3b8; }
+.footer-center { font-size: 8.5px; color: #94a3b8; text-align: center; }
+.footer-right  { font-size: 8.5px; color: #94a3b8; text-align: right; }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="doc-header">
+    <table class="header-table">
+        <tr>
+            <td>
+                <div class="brand-name">AGOCAR</div>
+                <div class="brand-sub">LOCATION DE VÉHICULES</div>
+            </td>
+            <td style="text-align:right">
+                <div class="doc-title">Rapport d'État des Dommages</div>
+                <div class="doc-ref">Réf. DMG-{{ voiture.id }}-{{ 'now'|date('Ymd') }} · Véhicule #{{ voiture.id }}</div>
+                <div class="doc-date">Établi le {{ 'now'|date('d/m/Y à H:i') }}</div>
+            </td>
+        </tr>
+    </table>
+</div>
+<div class="accent-bar"></div>
+
+<div class="body">
+
+    <!-- Informations générales -->
+    <div class="section-title">Informations générales</div>
+    <table class="info-table">
+        <tr>
+            <td class="info-box">
+                <div class="info-box-title">Véhicule</div>
+                <table class="info-row-table">
+                    <tr><td class="info-lbl">Marque / Modèle</td><td class="info-val">{{ voiture.marque }} {{ voiture.modele }}</td></tr>
+                    <tr><td class="info-lbl">Immatriculation</td><td class="info-val">{{ voiture.immatriculation ?: '—' }}</td></tr>
+                    <tr><td class="info-lbl">Couleur</td><td class="info-val">{{ voiture.couleur ?: '—' }}</td></tr>
+                    <tr><td class="info-lbl">Année</td><td class="info-val">{{ voiture.annee ?: '—' }}</td></tr>
+                    <tr><td class="info-lbl">Kilométrage</td><td class="info-val">{{ voiture.kilometrageActuel ? (voiture.kilometrageActuel|number_format(0, '.', ' ') ~ ' km') : '—' }}</td></tr>
+                </table>
+            </td>
+            <td class="info-box">
+                <div class="info-box-title">Agence</div>
+                <table class="info-row-table">
+                    <tr><td class="info-lbl">Agence</td><td class="info-val">{{ voiture.bureau ? voiture.bureau.nom : '—' }}</td></tr>
+                    <tr><td class="info-lbl">Dommages ouverts</td><td class="info-val" style="color:#dc2626">{{ openCount }}</td></tr>
+                    <tr><td class="info-lbl">Dommages réparés</td><td class="info-val" style="color:#16a34a">{{ repairedCount }}</td></tr>
+                    <tr><td class="info-lbl">Total coût réel</td><td class="info-val">{{ totalCost > 0 ? (totalCost|number_format(2, '.', ' ') ~ ' MAD') : '—' }}</td></tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+
+    <!-- Relevé des dommages -->
+    <div class="section-title">Relevé des dommages</div>
+    <table class="dmg-table">
+        <thead>
+            <tr>
+                <th style="width:15%">Zone</th>
+                <th style="width:10%">Sévérité</th>
+                <th>Description</th>
+                <th style="width:14%">Statut</th>
+                <th style="width:10%">Date</th>
+                <th class="right" style="width:11%">Coût réel</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for d in damages %}
+            {% set rowClass = 'sev-' ~ (d.status == 'repaired' ? 'repaired' : d.severity) %}
+            <tr class="{{ rowClass }}">
+                <td class="stripe">{{ zoneLabels[d.zone] ?? d.zone }}</td>
+                <td><span class="sev-label">{{ severityLabels[d.severity] ?? d.severity }}</span></td>
+                <td><span class="desc-text">{{ d.description ?: '—' }}</span></td>
+                <td>
+                    {% if d.status == 'repaired' %}
+                        <span class="badge badge-repaired">✓ Réparé</span>
+                    {% else %}
+                        <span class="badge badge-open">⚠ Ouvert</span>
+                    {% endif %}
+                </td>
+                <td><span class="date-text">{{ d.creeAu ? d.creeAu|date('d/m/Y') : '—' }}</span></td>
+                <td class="right">
+                    {% if d.repairMontant and d.repairMontant > 0 %}
+                        {{ d.repairMontant|number_format(0, '.', ' ') }} MAD
+                    {% else %}
+                        —
+                    {% endif %}
+                </td>
+            </tr>
+        {% else %}
+            <tr><td colspan="6" style="text-align:center;padding:16px;color:#94a3b8">Aucun dommage enregistré.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+
+    <!-- Totals -->
+    <table class="totals-table" style="background:#f1f5f9;border-top:2px solid #e2e8f0">
+        <tr>
+            <td style="width:60%"></td>
+            <td style="padding:7px 6px"><span class="total-lbl">Réparés</span></td>
+            <td style="padding:7px 6px"><span class="total-val-green">{{ repairedCount }}</span></td>
+            <td style="padding:7px 6px"><span class="total-lbl">Ouverts</span></td>
+            <td style="padding:7px 6px"><span class="total-val-red">{{ openCount }}</span></td>
+            <td style="padding:7px 6px"><span class="total-lbl">Total réel</span></td>
+            <td style="padding:7px 8px;text-align:right"><span class="total-val">{{ totalCost > 0 ? (totalCost|number_format(2, '.', ' ') ~ ' MAD') : '—' }}</span></td>
+        </tr>
+    </table>
+
+    {% if lastInspection %}
+    <!-- Condition au retour -->
+    <div class="section-title">Condition au retour (dernière inspection)</div>
+    <table class="cond-table">
+        <tr>
+            <td class="cond-box">
+                <div class="cond-label">Niveau carburant</div>
+                <div style="margin-top:4px">
+                    <div class="fuel-bar-bg">
+                        <div class="fuel-bar-fill" style="width:{{ lastInspection.fuelLevel ?? 0 }}%"></div>
+                    </div>
+                </div>
+                <div class="cond-sub" style="margin-top:4px">{{ lastInspection.fuelLevel ?? '—' }}%</div>
+            </td>
+            <td class="cond-box">
+                <div class="cond-label">Kilométrage retour</div>
+                <div class="cond-value" style="font-size:13px">{{ lastInspection.kilometrage ? (lastInspection.kilometrage|number_format(0, '.', ' ') ~ ' km') : '—' }}</div>
+            </td>
+            <td class="cond-box">
+                <div class="cond-label">État général</div>
+                <div style="margin-top:4px">
+                    {% if lastInspection.condition == 'clean' %}
+                        <span class="cond-badge-clean">Bon état</span>
+                    {% elseif lastInspection.condition == 'minor_damage' %}
+                        <span class="cond-badge-minor">Dommages mineurs</span>
+                    {% else %}
+                        <span class="cond-badge-major">Dommages majeurs</span>
+                    {% endif %}
+                </div>
+            </td>
+        </tr>
+    </table>
+    {% endif %}
+
+    <!-- Remarques -->
+    <div class="section-title">Remarques</div>
+    <div class="remarks-box">
+        {% if lastInspection and lastInspection.notes %}
+            {{ lastInspection.notes }}
+        {% else %}
+            &nbsp;
+        {% endif %}
+    </div>
+
+    <!-- Signatures -->
+    <div class="section-title">Signatures</div>
+    <table class="sig-table">
+        <tr>
+            <td class="sig-box">
+                <div class="sig-title">Agent de l'agence</div>
+                <div class="sig-line"></div>
+                <div class="sig-name">Nom &amp; Cachet</div>
+            </td>
+            <td class="sig-box">
+                <div class="sig-title">Client</div>
+                <div class="sig-line"></div>
+                <div class="sig-name">Lu et approuvé</div>
+            </td>
+        </tr>
+    </table>
+
+</div>
+
+<!-- Footer -->
+<div class="doc-footer">
+    <table class="footer-table">
+        <tr>
+            <td class="footer-left">AGOCAR · {{ voiture.bureau ? voiture.bureau.nom : 'Agence' }}</td>
+            <td class="footer-center">Ce document a valeur contractuelle — toute modification le rend nul</td>
+            <td class="footer-right">Page 1 / 1</td>
+        </tr>
+    </table>
+</div>
+
+</body>
+</html>

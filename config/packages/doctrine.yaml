@@ -4,7 +4,7 @@ doctrine:
 
         # IMPORTANT: You MUST configure your server version,
         # either here or in the DATABASE_URL env var (see .env file)
-        #server_version: '16'
+        server_version: 'mariadb-10.4.32'
 
         profiling_collect_backtrace: '%kernel.debug%'
         use_savepoints: true
@@ -16,6 +16,10 @@ doctrine:
         naming_strategy: doctrine.orm.naming_strategy.underscore_number_aware
         identity_generation_preferences:
             Doctrine\DBAL\Platforms\PostgreSQLPlatform: identity
+        dql:
+            numeric_functions:
+                YEAR:  App\Doctrine\Dql\Year
+                MONTH: App\Doctrine\Dql\Month
         auto_mapping: true
         mappings:
             App:
@@ -24,6 +28,10 @@ doctrine:
                 dir: '%kernel.project_dir%/src/Entity'
                 prefix: 'App\Entity'
                 alias: App
+        filters:
+            soft_delete:
+                class: App\Doctrine\SoftDeleteFilter
+                enabled: true
         controller_resolver:
             auto_mapping: false
 

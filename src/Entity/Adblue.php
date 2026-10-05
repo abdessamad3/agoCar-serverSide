@@ -29,6 +29,12 @@ class Adblue
     #[ORM\Column(type: 'datetime_immutable', nullable: true)]
     private ?\DateTimeImmutable $editAu = null;
 
+    #[ORM\Column(type: 'json', nullable: true)]
+    private array $filePaths = [];
+
+    #[ORM\Column(type: 'datetime_immutable', nullable: true)]
+    private ?\DateTimeImmutable $deletedAt = null;
+
     public function getId(): ?int { return $this->id; }
     public function getDepense(): ?Depense { return $this->depense; }
     public function setDepense(?Depense $depense): static { $this->depense = $depense; return $this; }
@@ -40,4 +46,8 @@ class Adblue
     public function setCreeAu(?\DateTimeImmutable $creeAu): static { $this->creeAu = $creeAu; return $this; }
     public function getEditAu(): ?\DateTimeImmutable { return $this->editAu; }
     public function setEditAu(?\DateTimeImmutable $editAu): static { $this->editAu = $editAu; return $this; }
+    public function getFilePaths(): array { return $this->filePaths ?? []; }
+    public function setFilePaths(array $filePaths): static { $this->filePaths = $filePaths; return $this; }
+    public function getDeletedAt(): ?\DateTimeImmutable { return $this->deletedAt; }
+    public function setDeletedAt(?\DateTimeImmutable $deletedAt): static { $this->deletedAt = $deletedAt; return $this; }
 }

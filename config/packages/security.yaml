@@ -22,8 +22,20 @@ security:
   access_control:
     # Public endpoints (no auth required)
     - { path: ^/api/auth/register, roles: PUBLIC_ACCESS }
-    - { path: ^/api/auth/login, roles: PUBLIC_ACCESS }
-    
-    # Protected endpoints (requires authentication)
-    - { path: ^/api/auth/me, roles: IS_AUTHENTICATED_FULLY }
-    - { path: ^/api, roles: IS_AUTHENTICATED_FULLY } 
+    - { path: ^/api/auth/login,    roles: PUBLIC_ACCESS }
+    - { path: ^/api/auth/refresh,  roles: PUBLIC_ACCESS }
+    - { path: ^/api/auth/logout,   roles: PUBLIC_ACCESS }
+
+    # Public car rental website (catalog, booking submission, client registration)
+    - { path: ^/api/site, roles: PUBLIC_ACCESS }
+
+    # Frontend crash reporting — must work even before login (see
+    # ErrorLogController::reportClientError / Angular GlobalErrorHandler)
+    - { path: ^/api/error-log/client, roles: PUBLIC_ACCESS }
+
+    # Client portal — authenticated clients only (ROLE_CLIENT, no admin access)
+    - { path: ^/api/client-portal, roles: ROLE_CLIENT }
+
+    # Admin/staff endpoints — ROLE_USER (auto-granted to all non-client staff)
+    - { path: ^/api/auth/me, roles: ROLE_USER }
+    - { path: ^/api,         roles: ROLE_USER } 

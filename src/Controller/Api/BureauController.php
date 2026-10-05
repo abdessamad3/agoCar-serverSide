@@ -4,6 +4,8 @@ namespace App\Controller\Api;
 
 use App\Entity\Bureau;
 use App\Repository\BureauRepository;
+use App\Repository\CompanyRepository;
+use App\Repository\UtilisateurRepository;
 use Doctrine\DBAL\Exception\ForeignKeyConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -28,7 +30,7 @@ class BureauController extends AbstractController
         try {
             // Get query parameters
             $page = (int) $request->query->get('page', 1);
-            $limit = (int) $request->query->get('limit', 10);
+            $limit = min(200, max(1, (int) $request->query->get('limit', 20)));
             $search = $request->query->get('search', '');
             $statut = $request->query->get('statut', '');
             $sort = $request->query->get('sort', 'id');
@@ -36,7 +38,6 @@ class BureauController extends AbstractController
 
             // Validate pagination params
             $page = max(1, $page);
-            $limit = min(100, max(1, $limit));
             $direction = in_array($direction, ['ASC', 'DESC']) ? $direction : 'ASC';
 
             // Build filters
@@ -54,22 +55,29 @@ class BureauController extends AbstractController
 
             // Format response
             $data = array_map(fn($b) => [
-                'id'      => $b->getId(),
-                'nom'     => $b->getNom(),
-                'adresse' => $b->getAdresse(),
-                'statut'  => $b->getStatut(),
-                'creeAu'  => $b->getCreeAu()?->format('Y-m-d H:i:s'),
-                'editAu'  => $b->getEditAu()?->format('Y-m-d H:i:s'),
+                'id'          => $b->getId(),
+                'nom'         => $b->getNom(),
+                'adresse'     => $b->getAdresse(),
+                'telephone'   => $b->getTelephone(),
+                'statut'      => $b->getStatut(),
+                'companyId'   => $b->getCompany()?->getId(),
+                'companyNom'  => $b->getCompany()?->getNom(),
+                'companyLogo' => $b->getCompany()?->getLogo(),
+                'managerId'   => $b->getManager()?->getId(),
+                'managerNom'  => $b->getManager() ? trim(($b->getManager()->getPrenom() ?? '') . ' ' . ($b->getManager()->getNom() ?? '')) : null,
+                'creeAu'      => $b->getCreeAu()?->format('Y-m-d H:i:s'),
+                'editAu'      => $b->getEditAu()?->format('Y-m-d H:i:s'),
             ], $bureaus);
 
             return $this->json([
                 'data' => $data,
                 'meta' => [
-                    'page' => $page,
-                    'limit' => $limit,
-                    'total' => $total,
-                    'pages' => (int) $pages,
-                    'hasMore' => $page < $pages,
+                    'total'       => $total,
+                    'page'        => $page,
+                    'limit'       => $limit,
+                    'totalPages'  => (int) ceil($total / $limit) ?: 1,
+                    'hasNextPage' => $page < ((int) ceil($total / $limit) ?: 1),
+                    'hasPrevPage' => $page > 1,
                 ]
             ]);
 
@@ -89,13 +97,19 @@ class BureauController extends AbstractController
     {
         try {
             return $this->json([
-                'id'      => $bureau->getId(),
-                'nom'     => $bureau->getNom(),
-                'adresse' => $bureau->getAdresse(),
-                'statut'  => $bureau->getStatut(),
-                'creeAu'  => $bureau->getCreeAu()?->format('Y-m-d H:i:s'),
-                'editAu'  => $bureau->getEditAu()?->format('Y-m-d H:i:s'),
-                'creePar' => $bureau->getCreePar()?->getId(),
+                'id'         => $bureau->getId(),
+                'nom'        => $bureau->getNom(),
+                'adresse'    => $bureau->getAdresse(),
+                'telephone'  => $bureau->getTelephone(),
+                'statut'     => $bureau->getStatut(),
+                'companyId'   => $bureau->getCompany()?->getId(),
+                'companyNom'  => $bureau->getCompany()?->getNom(),
+                'companyLogo' => $bureau->getCompany()?->getLogo(),
+                'managerId'  => $bureau->getManager()?->getId(),
+                'managerNom' => $bureau->getManager() ? trim(($bureau->getManager()->getPrenom() ?? '') . ' ' . ($bureau->getManager()->getNom() ?? '')) : null,
+                'creeAu'     => $bureau->getCreeAu()?->format('Y-m-d H:i:s'),
+                'editAu'     => $bureau->getEditAu()?->format('Y-m-d H:i:s'),
+                'creePar'    => $bureau->getCreePar()?->getId(),
             ]);
         } catch (\Exception $e) {
             return $this->json([
@@ -109,32 +123,35 @@ class BureauController extends AbstractController
      * Create new bureau
      */
     #[Route('', name: 'create', methods: ['POST'])]
-    public function create(Request $request, EntityManagerInterface $em): JsonResponse
+    #[IsGranted('ROLE_ADMIN')]
+    public function create(Request $request, EntityManagerInterface $em, CompanyRepository $companyRepo, UtilisateurRepository $userRepo): JsonResponse
     {
         try {
             $data = json_decode($request->getContent(), true);
 
-            // Validate required fields
             if (empty($data['nom'])) {
-                return $this->json([
-                    'error' => 'Validation failed',
-                    'message' => 'nom is required'
-                ], 400);
+                return $this->json(['error' => 'Validation failed', 'message' => 'nom is required'], 400);
             }
-
             if (empty($data['statut'])) {
-                return $this->json([
-                    'error' => 'Validation failed',
-                    'message' => 'statut is required'
-                ], 400);
+                return $this->json(['error' => 'Validation failed', 'message' => 'statut is required'], 400);
             }
 
             $bureau = new Bureau();
             $bureau->setNom($data['nom']);
             $bureau->setAdresse($data['adresse'] ?? null);
+            $bureau->setTelephone($data['telephone'] ?? null);
             $bureau->setStatut($data['statut']);
             $bureau->setCreeAu(new \DateTimeImmutable());
-            $bureau->setCreePar($this->getUser());
+
+            if (!empty($data['companyId'])) {
+                $company = $companyRepo->find($data['companyId']);
+                if ($company) $bureau->setCompany($company);
+            }
+
+            if (!empty($data['managerId'])) {
+                $manager = $userRepo->find($data['managerId']);
+                if ($manager) $bureau->setManager($manager);
+            }
 
             $em->persist($bureau);
             $em->flush();
@@ -143,10 +160,11 @@ class BureauController extends AbstractController
                 'message' => 'Bureau créé avec succès',
                 'id' => $bureau->getId(),
                 'data' => [
-                    'id' => $bureau->getId(),
-                    'nom' => $bureau->getNom(),
-                    'adresse' => $bureau->getAdresse(),
-                    'statut' => $bureau->getStatut(),
+                    'id'        => $bureau->getId(),
+                    'nom'       => $bureau->getNom(),
+                    'adresse'   => $bureau->getAdresse(),
+                    'telephone' => $bureau->getTelephone(),
+                    'statut'    => $bureau->getStatut(),
                 ]
             ], 201);
 
@@ -162,14 +180,22 @@ class BureauController extends AbstractController
      * Update existing bureau
      */
     #[Route('/{id}', name: 'update', methods: ['PUT'])]
-    public function update(Bureau $bureau, Request $request, EntityManagerInterface $em): JsonResponse
+    #[IsGranted('ROLE_ADMIN')]
+    public function update(Bureau $bureau, Request $request, EntityManagerInterface $em, CompanyRepository $companyRepo, UtilisateurRepository $userRepo): JsonResponse
     {
         try {
             $data = json_decode($request->getContent(), true);
 
-            if (isset($data['nom']))     $bureau->setNom($data['nom']);
-            if (isset($data['adresse'])) $bureau->setAdresse($data['adresse']);
-            if (isset($data['statut']))  $bureau->setStatut($data['statut']);
+            if (isset($data['nom']))        $bureau->setNom($data['nom']);
+            if (isset($data['adresse']))    $bureau->setAdresse($data['adresse']);
+            if (array_key_exists('telephone', $data)) $bureau->setTelephone($data['telephone']);
+            if (isset($data['statut']))     $bureau->setStatut($data['statut']);
+            if (array_key_exists('companyId', $data)) {
+                $bureau->setCompany($data['companyId'] ? $companyRepo->find($data['companyId']) : null);
+            }
+            if (array_key_exists('managerId', $data)) {
+                $bureau->setManager($data['managerId'] ? $userRepo->find($data['managerId']) : null);
+            }
             
             $bureau->setEditAu(new \DateTimeImmutable());
 
@@ -178,10 +204,11 @@ class BureauController extends AbstractController
             return $this->json([
                 'message' => 'Bureau mis à jour avec succès',
                 'data' => [
-                    'id' => $bureau->getId(),
-                    'nom' => $bureau->getNom(),
-                    'adresse' => $bureau->getAdresse(),
-                    'statut' => $bureau->getStatut(),
+                    'id'        => $bureau->getId(),
+                    'nom'       => $bureau->getNom(),
+                    'adresse'   => $bureau->getAdresse(),
+                    'telephone' => $bureau->getTelephone(),
+                    'statut'    => $bureau->getStatut(),
                 ]
             ]);
 
@@ -197,7 +224,8 @@ class BureauController extends AbstractController
      * Delete bureau
      */
     #[Route('/{id}', name: 'delete', methods: ['DELETE'])]
-    public function delete(int $id, BureauRepository $repo, EntityManagerInterface $em): JsonResponse
+    #[IsGranted('ROLE_ADMIN')]
+    public function delete(int $id, BureauRepository $repo, UtilisateurRepository $utilisateurRepo, EntityManagerInterface $em): JsonResponse
     {
         try {
             $bureau = $repo->find($id);
@@ -209,8 +237,15 @@ class BureauController extends AbstractController
                 ], 404);
             }
 
-            // Attempt to delete
-            $em->remove($bureau);
+            $userCount = $utilisateurRepo->count(['bureau' => $bureau]);
+            if ($userCount > 0) {
+                return $this->json([
+                    'error' => 'Cannot delete',
+                    'message' => "Cannot delete this bureau — it has {$userCount} user(s) assigned. Reassign or remove them first."
+                ], 409);
+            }
+
+            $bureau->setDeletedAt(new \DateTimeImmutable());
             $em->flush();
 
             return $this->json([
@@ -218,10 +253,9 @@ class BureauController extends AbstractController
             ], 200);
 
         } catch (ForeignKeyConstraintViolationException $e) {
-            // Bureau has cars assigned to it
             return $this->json([
                 'error' => 'Constraint violation',
-                'message' => 'Cannot delete this bureau. It has cars assigned to it.'
+                'message' => 'Cannot delete this bureau — it has related records.'
             ], 409);
         } catch (\Exception $e) {
             return $this->json([
