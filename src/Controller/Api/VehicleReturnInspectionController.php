@@ -10,6 +10,7 @@ use App\Repository\ContratRepository;
 use App\Repository\ReservationRepository;
 use App\Repository\VehicleDeliveryRepository;
 use App\Repository\VehicleReturnInspectionRepository;
+use App\Service\NotificationService;
 use App\Trait\BureauAwareTrait;
 use App\Trait\PaginationTrait;
 use Doctrine\ORM\EntityManagerInterface;
@@ -214,7 +215,8 @@ class VehicleReturnInspectionController extends AbstractController
     public function validate(
         VehicleReturnInspection $inspection,
         EntityManagerInterface $em,
-        VehicleDeliveryRepository $deliveryRepo
+        VehicleDeliveryRepository $deliveryRepo,
+        NotificationService $notificationService
     ): JsonResponse {
         $reservation = $inspection->getReservation();
 
@@ -254,6 +256,24 @@ class VehicleReturnInspectionController extends AbstractController
 
         $inspection->setEditAu(new \DateTimeImmutable());
         $em->flush();
+
+        $restant = $reservation->getMontantRestant();
+        if ($restant > 0) {
+            $client   = $reservation->getClient();
+            $carLabel = $voiture
+                ? $voiture->getMarque() . ' ' . $voiture->getModele()
+                    . ($voiture->getImmatriculation() ? ' (' . $voiture->getImmatriculation() . ')' : '')
+                : 'véhicule';
+            $notificationService->createForAllUsers(
+                NotificationService::TYPE_RESERVATION_UNPAID,
+                'reservation',
+                $reservation->getId(),
+                "Contrat clôturé avec solde impayé - $carLabel",
+                trim($client?->getNom() ?? 'Client inconnu') . ' doit encore ' . number_format($restant, 0, ',', ' ') . ' MAD.',
+                NotificationService::PRIORITY_HIGH,
+                '/client-debts',
+            );
+        }
 
         $kmDepart = $this->getKmDepartForReservation($reservation->getId(), $deliveryRepo);
 

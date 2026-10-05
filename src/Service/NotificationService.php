@@ -23,6 +23,7 @@ class NotificationService
     public const TYPE_CREDIT_OVERDUE      = 'credit_overdue';
     public const TYPE_RESERVATION_CREATED  = 'reservation_created';
     public const TYPE_RESERVATION_CONFLICT = 'reservation_conflict';
+    public const TYPE_RESERVATION_UNPAID   = 'reservation_unpaid';
     public const TYPE_VEHICLE_SOLD         = 'vehicle_sold';
 
     // Legacy aliases (kept so existing DB rows still display correctly)

@@ -3,6 +3,7 @@
 namespace App\Command;
 
 use App\Entity\Reservation;
+use App\Service\NotificationService;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -25,8 +26,10 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 )]
 class SyncReservationStatusCommand extends Command
 {
-    public function __construct(private EntityManagerInterface $em)
-    {
+    public function __construct(
+        private EntityManagerInterface $em,
+        private NotificationService    $notificationService,
+    ) {
         parent::__construct();
     }
 
@@ -77,6 +80,27 @@ class SyncReservationStatusCommand extends Command
 
         foreach ($reservations as $r) {
             $r->setReservationStatus($toStatus);
+
+            if ($toStatus === 'terminee') {
+                $restant = $r->getMontantRestant();
+                if ($restant > 0) {
+                    $voiture  = $r->getVoiture();
+                    $client   = $r->getClient();
+                    $carLabel = $voiture
+                        ? $voiture->getMarque() . ' ' . $voiture->getModele()
+                            . ($voiture->getImmatriculation() ? ' (' . $voiture->getImmatriculation() . ')' : '')
+                        : 'véhicule';
+                    $this->notificationService->createForAllUsers(
+                        NotificationService::TYPE_RESERVATION_UNPAID,
+                        'reservation',
+                        $r->getId(),
+                        "Contrat clôturé avec solde impayé - $carLabel",
+                        trim($client?->getNom() ?? 'Client inconnu') . ' doit encore ' . number_format($restant, 0, ',', ' ') . ' MAD.',
+                        NotificationService::PRIORITY_HIGH,
+                        '/client-debts',
+                    );
+                }
+            }
         }
 
         return count($reservations);
