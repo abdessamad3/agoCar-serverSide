@@ -80,6 +80,7 @@ class PaiementController extends AbstractController
             ->select('p')
             ->from(Paiement::class, 'p')
             ->leftJoin('p.reservation', 'r')
+            ->leftJoin('r.voiture', 'rv')
             ->leftJoin('p.credit', 'c')
             ->leftJoin('c.voiture', 'cv')
             ->orderBy('p.datePaiement', 'DESC');
@@ -89,7 +90,9 @@ class PaiementController extends AbstractController
         } elseif ($creditId) {
             $qb->andWhere('p.credit = :creditId')->setParameter('creditId', $creditId);
         } elseif ($bureauId !== null) {
-            $qb->andWhere('r.bureau = :bureauId OR cv.bureau = :bureauId')->setParameter('bureauId', $bureauId);
+            // r.bureau is a legacy field that's never actually populated on reservation
+            // creation -- go through the reservation's voiture for the real bureau.
+            $qb->andWhere('rv.bureau = :bureauId OR cv.bureau = :bureauId')->setParameter('bureauId', $bureauId);
         }
 
         [$items, $total] = $this->paginateQb($qb, $page, $reservationId > 0 || $creditId > 0);
@@ -118,8 +121,14 @@ class PaiementController extends AbstractController
                 return $this->json(['error' => 'Réservation introuvable'], 404);
             }
             $montant = (float) ($data['montant'] ?? 0);
-            if ($montant <= 0) {
-                return $this->json(['error' => 'Le montant doit être supérieur à 0'], 400);
+            if ($montant === 0.0) {
+                return $this->json(['error' => 'Le montant ne peut pas être zéro'], 400);
+            }
+            // Negative montant = refund, recorded as its own row rather than editing/deleting
+            // the original payment (preserves the real history for cash/revenue reports).
+            // Bounded so you can't refund more than was actually collected.
+            if ($montant < 0 && abs($montant) > (float) $reservation->getMontantPaye()) {
+                return $this->json(['error' => 'Le remboursement dépasse le montant déjà payé pour cette réservation'], 400);
             }
         }
 
