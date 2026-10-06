@@ -437,6 +437,73 @@ class LocationController extends AbstractController
         return $this->json(['success' => true, 'message' => 'Clôture annulée. Contrat réactivé.']);
     }
 
+    // ── POST /api/location/{id}/annuler-livraison ────────────────────────────
+
+    /** Reverses a hand-over — only within 1h of the original delivery (checked against
+     *  VehicleDelivery's editAu, falling back to creeAu when it was never re-edited).
+     *  Reverts the reservation status and deletes the VehicleDelivery record, then re-syncs
+     *  the vehicle's lifecycle state. Deliberately does NOT delete the Contrat record — it
+     *  already carries a real, sequential, possibly-already-printed contract number;
+     *  redoing the hand-over later just reuses/updates that same record instead of
+     *  burning the number. Also does NOT touch any payment collected at hand-over — money
+     *  already received shouldn't silently un-record itself; staff remove it explicitly via
+     *  the Paiements tab if it was genuinely a mistake. */
+    #[Route('/{reservationId}/annuler-livraison', name: 'annuler_livraison', methods: ['POST'], requirements: ['reservationId' => '\d+'])]
+    public function annulerLivraison(
+        int $reservationId,
+        ReservationRepository $reservationRepo,
+        VehicleDeliveryRepository $deliveryRepo,
+        EntityManagerInterface $em
+    ): JsonResponse {
+        $reservation = $reservationRepo->find($reservationId);
+        if (!$reservation) {
+            return $this->json(['error' => 'Réservation introuvable'], 404);
+        }
+
+        if ($reservation->getReservationStatus() !== 'en_cours') {
+            return $this->json(['error' => 'Ce contrat n\'est pas en cours'], 400);
+        }
+
+        $delivery = $deliveryRepo->findOneBy(['reservation' => $reservation]);
+        if (!$delivery) {
+            return $this->json(['error' => 'Aucune remise de véhicule trouvée'], 404);
+        }
+
+        $deliveredAt = $delivery->getEditAu() ?? $delivery->getCreeAu();
+        if (!$deliveredAt || (new \DateTimeImmutable())->getTimestamp() - $deliveredAt->getTimestamp() > 3600) {
+            return $this->json([
+                'error'   => 'undo_window_expired',
+                'message' => 'L\'annulation de la remise n\'est possible que dans l\'heure qui suit.',
+            ], 403);
+        }
+
+        $em->remove($delivery);
+        $reservation->setReservationStatus('confirmed');
+        $reservation->setEditAu(new \DateTimeImmutable());
+        $em->persist($reservation);
+        $em->flush();
+
+        $this->activityLog->logUpdate(
+            'Reservation',
+            $reservation->getId(),
+            ['reservationStatus' => 'en_cours'],
+            ['reservationStatus' => 'confirmed', 'action' => 'undo_livraison'],
+            $reservation->getBureau(),
+        );
+
+        // Voiture.voitureStatus may only be written via FleetLifecycleManager::applyEvent() —
+        // re-sync now that the reservation is no longer actively delivered.
+        $voiture = $reservation->getVoiture();
+        if ($voiture) {
+            $this->flm->applyEvent($voiture, new TemporalSyncTriggered(
+                $voiture->getId(),
+                $voiture->getBureau()?->getId(),
+            ));
+        }
+
+        return $this->json(['success' => true, 'message' => 'Remise annulée. Réservation réactivée.']);
+    }
+
     // ── POST /api/location/{id}/termine-avant-terme ─────────────────────────
 
     #[Route('/{reservationId}/termine-avant-terme', name: 'termine_avant_terme', methods: ['POST'], requirements: ['reservationId' => '\d+'])]
