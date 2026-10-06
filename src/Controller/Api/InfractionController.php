@@ -21,6 +21,18 @@ class InfractionController extends AbstractController
     use BureauAwareTrait;
     use PaginationTrait;
 
+    /** Bureau-locked staff/managers may only touch infractions belonging to their own
+     *  bureau. True admins (getEffectiveBureauId() === null) are unrestricted. */
+    private function assertBureauAccess(Infraction $infraction): void
+    {
+        $bureauId = $this->getEffectiveBureauId();
+        if ($bureauId === null) return;
+
+        if ($infraction->getReservation()?->getVoiture()?->getBureau()?->getId() !== $bureauId) {
+            throw $this->createNotFoundException('Infraction introuvable');
+        }
+    }
+
     private function serialize(Infraction $i): array
     {
         $res  = $i->getReservation();
@@ -67,6 +79,7 @@ class InfractionController extends AbstractController
     #[Route('/{id}', name: 'show', methods: ['GET'])]
     public function show(Infraction $infraction): JsonResponse
     {
+        $this->assertBureauAccess($infraction);
         return $this->json($this->serialize($infraction));
     }
 
@@ -102,6 +115,7 @@ class InfractionController extends AbstractController
     #[Route('/{id}', name: 'update', methods: ['PUT'])]
     public function update(Infraction $infraction, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertBureauAccess($infraction);
         $data = json_decode($request->getContent(), true);
 
         if (isset($data['numeroInfraction']))          $infraction->setNumeroInfraction($data['numeroInfraction']);
@@ -123,6 +137,7 @@ class InfractionController extends AbstractController
     #[Route('/{id}', name: 'delete', methods: ['DELETE'])]
     public function delete(Infraction $infraction, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertBureauAccess($infraction);
         $infraction->setDeletedAt(new \DateTimeImmutable());
         $em->flush();
 

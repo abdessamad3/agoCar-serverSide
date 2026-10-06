@@ -23,6 +23,18 @@ class AchatVoitureController extends AbstractController
     use BureauAwareTrait;
     use PaginationTrait;
 
+    /** Bureau-locked staff/managers may only touch purchases belonging to their own
+     *  bureau. True admins (getEffectiveBureauId() === null) are unrestricted. */
+    private function assertBureauAccess(AchatVoiture $achatVoiture): void
+    {
+        $bureauId = $this->getEffectiveBureauId();
+        if ($bureauId === null) return;
+
+        if ($achatVoiture->getVoiture()?->getBureau()?->getId() !== $bureauId) {
+            throw $this->createNotFoundException('Achat introuvable');
+        }
+    }
+
     private function serialize(AchatVoiture $a): array
     {
         $v = $a->getVoiture();
@@ -77,6 +89,7 @@ class AchatVoitureController extends AbstractController
     #[Route('/{id}', name: 'show', methods: ['GET'])]
     public function show(AchatVoiture $achatVoiture): JsonResponse
     {
+        $this->assertBureauAccess($achatVoiture);
         return $this->json($this->serialize($achatVoiture));
     }
 
@@ -143,6 +156,7 @@ class AchatVoitureController extends AbstractController
         VoitureRepository $voitureRepo,
         FournisseurRepository $fournisseurRepo
     ): JsonResponse {
+        $this->assertBureauAccess($achatVoiture);
         $data = json_decode($request->getContent(), true);
 
         if (isset($data['voitureId'])) {
@@ -177,6 +191,7 @@ class AchatVoitureController extends AbstractController
     #[Route('/{id}', name: 'delete', methods: ['DELETE'])]
     public function delete(AchatVoiture $achatVoiture, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertBureauAccess($achatVoiture);
         $achatVoiture->setDeletedAt(new \DateTimeImmutable());
         $em->flush();
 

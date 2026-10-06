@@ -38,6 +38,18 @@ class SuiviTechniqueController extends AbstractController
         private FleetLifecycleManager     $flm,
     ) {}
 
+    /** Bureau-locked staff/managers may only touch technical inspections belonging to
+     *  their own bureau. True admins (getEffectiveBureauId() === null) are unrestricted. */
+    private function assertBureauAccess(SuiviTechnique $suivi): void
+    {
+        $bureauId = $this->getEffectiveBureauId();
+        if ($bureauId === null) return;
+
+        if ($suivi->getVoiture()?->getBureau()?->getId() !== $bureauId) {
+            throw $this->createNotFoundException('Contrôle technique introuvable');
+        }
+    }
+
     private function serialize(SuiviTechnique $s): array
     {
         $dep  = $s->getDepense();
@@ -90,6 +102,7 @@ class SuiviTechniqueController extends AbstractController
     #[Route('/{id}', name: 'show', methods: ['GET'])]
     public function show(SuiviTechnique $suivi): JsonResponse
     {
+        $this->assertBureauAccess($suivi);
         return $this->json($this->serialize($suivi));
     }
 
@@ -158,6 +171,7 @@ class SuiviTechniqueController extends AbstractController
     #[Route('/{id}', name: 'update', methods: ['PUT'])]
     public function update(SuiviTechnique $suivi, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertBureauAccess($suivi);
         $data = json_decode($request->getContent(), true);
 
         if (isset($data['dateReglages']) && $suivi->getDepense()) $suivi->getDepense()->setDateDebut(new \DateTimeImmutable($data['dateReglages']));
@@ -185,6 +199,7 @@ class SuiviTechniqueController extends AbstractController
     #[Route('/{id}', name: 'delete', methods: ['DELETE'])]
     public function delete(SuiviTechnique $suivi, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertBureauAccess($suivi);
         $voiture = $suivi->getVoiture();
         $suivi->setDeletedAt(new \DateTimeImmutable());
         if ($suivi->getDepense()) {

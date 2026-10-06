@@ -31,6 +31,18 @@ class VidangeController extends AbstractController
         private DepensePaymentService     $paymentService
     ) {}
 
+    /** Bureau-locked staff/managers may only touch oil-change records belonging to
+     *  their own bureau. True admins (getEffectiveBureauId() === null) are unrestricted. */
+    private function assertBureauAccess(Vidange $vidange): void
+    {
+        $bureauId = $this->getEffectiveBureauId();
+        if ($bureauId === null) return;
+
+        if ($vidange->getDepense()?->getVoiture()?->getBureau()?->getId() !== $bureauId) {
+            throw $this->createNotFoundException('Vidange introuvable');
+        }
+    }
+
     private function serialize(Vidange $v): array
     {
         $dep  = $v->getDepense();
@@ -90,6 +102,7 @@ class VidangeController extends AbstractController
     #[Route('/{id}', name: 'show', methods: ['GET'])]
     public function show(Vidange $vidange): JsonResponse
     {
+        $this->assertBureauAccess($vidange);
         return $this->json($this->serialize($vidange));
     }
 
@@ -150,6 +163,7 @@ class VidangeController extends AbstractController
     #[Route('/{id}', name: 'update', methods: ['PUT'])]
     public function update(Vidange $vidange, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertBureauAccess($vidange);
         $data = json_decode($request->getContent(), true);
 
         $km = $data['kilometrage'] ?? $data['kilometrageSuivant'] ?? null;
@@ -180,6 +194,7 @@ class VidangeController extends AbstractController
     #[Route('/{id}', name: 'delete', methods: ['DELETE'])]
     public function delete(Vidange $vidange, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertBureauAccess($vidange);
         $vidange->setDeletedAt(new \DateTimeImmutable());
         if ($vidange->getDepense()) {
             $vidange->getDepense()->setDeletedAt(new \DateTimeImmutable());

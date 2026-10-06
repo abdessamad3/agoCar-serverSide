@@ -37,6 +37,18 @@ class AssuranceController extends AbstractController
         private FleetLifecycleManager     $flm,
     ) {}
 
+    /** Bureau-locked staff/managers may only touch insurance records belonging to
+     *  their own bureau. True admins (getEffectiveBureauId() === null) are unrestricted. */
+    private function assertBureauAccess(Assurance $assurance): void
+    {
+        $bureauId = $this->getEffectiveBureauId();
+        if ($bureauId === null) return;
+
+        if ($assurance->getDepense()?->getVoiture()?->getBureau()?->getId() !== $bureauId) {
+            throw $this->createNotFoundException('Assurance introuvable');
+        }
+    }
+
     private function snapshotAssurance(Assurance $a): array
     {
         $dep = $a->getDepense();
@@ -130,6 +142,7 @@ class AssuranceController extends AbstractController
     #[Route('/{id}', name: 'show', methods: ['GET'])]
     public function show(Assurance $assurance): JsonResponse
     {
+        $this->assertBureauAccess($assurance);
         return $this->json($this->serialize($assurance));
     }
 
@@ -213,6 +226,7 @@ class AssuranceController extends AbstractController
     #[Route('/{id}', name: 'update', methods: ['PUT'])]
     public function update(Assurance $assurance, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertBureauAccess($assurance);
         $data    = json_decode($request->getContent(), true);
         $oldSnap = $this->snapshotAssurance($assurance);
 
@@ -249,6 +263,7 @@ class AssuranceController extends AbstractController
         EntityManagerInterface $em,
         VoitureRepository $voitureRepo
     ): JsonResponse {
+        $this->assertBureauAccess($assurance);
         $data = json_decode($request->getContent(), true);
 
         if ($assurance->getDeletedAt() !== null) {
@@ -327,6 +342,7 @@ class AssuranceController extends AbstractController
     #[Route('/{id}/cancel', name: 'cancel', methods: ['POST'])]
     public function cancel(Assurance $assurance, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertBureauAccess($assurance);
         if ($assurance->getCancelledAt() !== null) {
             return $this->json(['error' => 'Cette assurance est déjà annulée.'], 422);
         }
@@ -349,6 +365,7 @@ class AssuranceController extends AbstractController
     #[Route('/{id}/file', name: 'upload_file', methods: ['POST'])]
     public function uploadFile(Assurance $assurance, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertBureauAccess($assurance);
         $file = $request->files->get('file');
         if (!$file) {
             return $this->json(['error' => 'Aucun fichier'], 400);
@@ -371,6 +388,7 @@ class AssuranceController extends AbstractController
     #[Route('/{id}', name: 'delete', methods: ['DELETE'])]
     public function delete(Assurance $assurance, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertBureauAccess($assurance);
         $dep = $assurance->getDepense();
         if ($dep && $this->paieRepo->countByDepense($dep->getId()) > 0) {
             return $this->json([

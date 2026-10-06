@@ -30,6 +30,18 @@ class ClientController extends AbstractController
         private PaiementRepository $paiementRepo,
     ) {}
 
+    /** Bureau-locked staff/managers may only touch clients belonging to their own
+     *  bureau. True admins (getEffectiveBureauId() === null) are unrestricted. */
+    private function assertBureauAccess(Client $client): void
+    {
+        $bureauId = $this->getEffectiveBureauId();
+        if ($bureauId === null) return;
+
+        if ($client->getBureau()?->getId() !== $bureauId) {
+            throw $this->createNotFoundException('Client introuvable');
+        }
+    }
+
     private function snapshotClient(Client $c): array
     {
         return [
@@ -158,6 +170,7 @@ class ClientController extends AbstractController
     #[Route('/{id}', name: 'show', methods: ['GET'])]
     public function show(Client $client): JsonResponse
     {
+        $this->assertBureauAccess($client);
         $debt = $this->reservationRepo->getClientOutstandingDebt($client->getId());
 
         return $this->json(array_merge($this->serializeClient($client, $debt), [
@@ -169,6 +182,7 @@ class ClientController extends AbstractController
     #[Route('/{id}/financial-summary', name: 'financial_summary', methods: ['GET'])]
     public function financialSummary(Client $client): JsonResponse
     {
+        $this->assertBureauAccess($client);
         $summary = $this->reservationRepo->getClientFinancialSummary($client->getId());
         $lastPayment = $this->paiementRepo->getLastPaymentDate($client->getId());
 
@@ -239,6 +253,7 @@ class ClientController extends AbstractController
     #[Route('/{id}', name: 'update', methods: ['PUT'])]
     public function update(Client $client, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertBureauAccess($client);
         $data = json_decode($request->getContent(), true) ?? [];
 
         if ($dupField = $this->findDuplicateField($em, $data, $client->getId())) {
@@ -260,6 +275,7 @@ class ClientController extends AbstractController
     #[Route('/{id}', name: 'delete', methods: ['DELETE'])]
     public function delete(Client $client, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertBureauAccess($client);
         $count = $this->reservationRepo->count(['client' => $client]);
         if ($count > 0) {
             return $this->json([
@@ -280,6 +296,7 @@ class ClientController extends AbstractController
     #[Route('/{id}/documents', name: 'documents_list', methods: ['GET'])]
     public function listDocuments(Client $client, ClientDocumentRepository $repo): JsonResponse
     {
+        $this->assertBureauAccess($client);
         $docs = $repo->findBy(['client' => $client], ['uploadedAt' => 'DESC']);
         $data = array_map(fn(ClientDocument $d) => [
             'id'           => $d->getId(),
@@ -295,6 +312,7 @@ class ClientController extends AbstractController
     #[Route('/{id}/documents', name: 'documents_upload', methods: ['POST'])]
     public function uploadDocument(Client $client, Request $request, EntityManagerInterface $em, ClientDocumentRepository $repo): JsonResponse
     {
+        $this->assertBureauAccess($client);
         $file = $request->files->get('file');
         if (!$file) {
             return $this->json(['error' => 'No file provided'], 400);
@@ -346,6 +364,7 @@ class ClientController extends AbstractController
     #[Route('/{id}/documents/{docId}', name: 'documents_delete', methods: ['DELETE'])]
     public function deleteDocument(Client $client, int $docId, ClientDocumentRepository $repo, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertBureauAccess($client);
         $doc = $repo->find($docId);
         if (!$doc || $doc->getClient()->getId() !== $client->getId()) {
             return $this->json(['error' => 'Document not found'], 404);

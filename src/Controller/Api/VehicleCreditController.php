@@ -25,6 +25,18 @@ class VehicleCreditController extends AbstractController
     use BureauAwareTrait;
     use PaginationTrait;
 
+    /** Bureau-locked staff/managers may only touch vehicle credits belonging to their
+     *  own bureau. True admins (getEffectiveBureauId() === null) are unrestricted. */
+    private function assertBureauAccess(VehicleCredit $vc): void
+    {
+        $bureauId = $this->getEffectiveBureauId();
+        if ($bureauId === null) return;
+
+        if ($vc->getVoiture()?->getBureau()?->getId() !== $bureauId) {
+            throw $this->createNotFoundException('Crédit introuvable');
+        }
+    }
+
     // ── Serializer ────────────────────────────────────────────────────────────
 
     private function serialize(VehicleCredit $vc, bool $withInstallments = false, bool $withPayments = false): array
@@ -172,6 +184,7 @@ class VehicleCreditController extends AbstractController
     #[Route('/{id}', name: 'show', methods: ['GET'])]
     public function show(VehicleCredit $vc, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertBureauAccess($vc);
         $this->refreshInstallmentStatuses($vc, $em);
         $em->flush();
         return $this->json($this->serialize($vc, true, true));
@@ -266,6 +279,7 @@ class VehicleCreditController extends AbstractController
         FournisseurRepository $fournisseurRepo,
         FinancialInstitutionRepository $fiRepo
     ): JsonResponse {
+        $this->assertBureauAccess($vc);
         $data = json_decode($request->getContent(), true);
         $prevStatus = $vc->getStatus();
 
@@ -295,6 +309,7 @@ class VehicleCreditController extends AbstractController
     #[Route('/{id}', name: 'delete', methods: ['DELETE'])]
     public function delete(VehicleCredit $vc, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertBureauAccess($vc);
         $vc->setStatus('cancelled');
         $vc->setUpdatedAt(new \DateTimeImmutable());
         $em->flush();
@@ -306,6 +321,7 @@ class VehicleCreditController extends AbstractController
     #[Route('/{id}/installments', name: 'installments', methods: ['GET'])]
     public function installments(VehicleCredit $vc, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertBureauAccess($vc);
         $this->refreshInstallmentStatuses($vc, $em);
         $em->flush();
         $items = $vc->getInstallments()->toArray();

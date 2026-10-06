@@ -27,6 +27,18 @@ class VenteController extends AbstractController
         private FleetLifecycleManager $flm,
     ) {}
 
+    /** Bureau-locked staff/managers may only touch sales belonging to their own
+     *  bureau. True admins (getEffectiveBureauId() === null) are unrestricted. */
+    private function assertBureauAccess(Vente $vente): void
+    {
+        $bureauId = $this->getEffectiveBureauId();
+        if ($bureauId === null) return;
+
+        if ($vente->getBureau()?->getId() !== $bureauId) {
+            throw $this->createNotFoundException('Vente introuvable');
+        }
+    }
+
     private function serialize(Vente $v): array
     {
         $voit = $v->getVoiture();
@@ -76,6 +88,7 @@ class VenteController extends AbstractController
     #[Route('/{id}', name: 'show', methods: ['GET'])]
     public function show(Vente $vente): JsonResponse
     {
+        $this->assertBureauAccess($vente);
         return $this->json($this->serialize($vente));
     }
 
@@ -143,6 +156,7 @@ class VenteController extends AbstractController
     #[Route('/{id}', name: 'update', methods: ['PUT'])]
     public function update(Vente $vente, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertBureauAccess($vente);
         $data = json_decode($request->getContent(), true);
 
         if (isset($data['dateVente']))  $vente->setDateVente(new \DateTimeImmutable($data['dateVente']));
@@ -159,6 +173,7 @@ class VenteController extends AbstractController
     #[Route('/{id}', name: 'delete', methods: ['DELETE'])]
     public function delete(Vente $vente, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertBureauAccess($vente);
         $vente->setDeletedAt(new \DateTimeImmutable());
         $em->flush();
         return $this->json(['message' => 'Vente supprimée.']);

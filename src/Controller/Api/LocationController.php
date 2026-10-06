@@ -5,6 +5,7 @@ namespace App\Controller\Api;
 use App\Entity\Contrat;
 use App\Entity\Damage;
 use App\Entity\Paiement;
+use App\Entity\Reservation;
 use App\Entity\VehicleDelivery;
 use App\Entity\VehicleReturnInspection;
 use App\Enum\StatusEnum;
@@ -20,6 +21,7 @@ use App\Repository\VehicleReturnInspectionRepository;
 use App\Service\ActivityLogService;
 use App\Service\ComplianceService;
 use App\Service\PaymentSumHelper;
+use App\Trait\BureauAwareTrait;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -30,11 +32,26 @@ use Symfony\Component\Routing\Annotation\Route;
 #[Route('/api/location', name: 'app_api_location_')]
 class LocationController extends AbstractController
 {
+    use BureauAwareTrait;
+
     public function __construct(
         private ComplianceService $compliance,
         private FleetLifecycleManager $flm,
         private ActivityLogService $activityLog,
     ) {}
+
+    /** Bureau-locked staff/managers may only touch reservations belonging to their own
+     *  bureau. True admins (getEffectiveBureauId() === null) are unrestricted. */
+    private function assertBureauAccess(Reservation $reservation): void
+    {
+        $bureauId = $this->getEffectiveBureauId();
+        if ($bureauId === null) return;
+
+        $resBureauId = $reservation->getVoiture()?->getBureau()?->getId();
+        if ($resBureauId !== $bureauId) {
+            throw $this->createNotFoundException('Réservation introuvable');
+        }
+    }
 
     // ── GET /api/location/{id}/full ─────────────────────────────────────────
 
@@ -51,6 +68,7 @@ class LocationController extends AbstractController
         if (!$reservation) {
             return $this->json(['error' => 'Réservation introuvable'], Response::HTTP_NOT_FOUND);
         }
+        $this->assertBureauAccess($reservation);
 
         $voiture    = $reservation->getVoiture();
         $client     = $reservation->getClient();
@@ -119,6 +137,7 @@ class LocationController extends AbstractController
         if (!$reservation) {
             return $this->json(['error' => 'Réservation introuvable'], 404);
         }
+        $this->assertBureauAccess($reservation);
 
         $status = $reservation->getReservationStatus();
         if (!in_array($status, ['confirmed', 'confirmee', 'pending'], true)) {
@@ -265,6 +284,7 @@ class LocationController extends AbstractController
         if (!$reservation) {
             return $this->json(['error' => 'Réservation introuvable'], 404);
         }
+        $this->assertBureauAccess($reservation);
 
         if ($reservation->getReservationStatus() !== 'en_cours') {
             return $this->json(['error' => 'La réservation n\'est pas en cours'], 400);
@@ -407,6 +427,7 @@ class LocationController extends AbstractController
         if (!$reservation) {
             return $this->json(['error' => 'Réservation introuvable'], 404);
         }
+        $this->assertBureauAccess($reservation);
 
         if ($reservation->getReservationStatus() !== 'terminee') {
             return $this->json(['error' => 'Ce contrat n\'est pas clôturé'], 400);
@@ -474,6 +495,7 @@ class LocationController extends AbstractController
         if (!$reservation) {
             return $this->json(['error' => 'Réservation introuvable'], 404);
         }
+        $this->assertBureauAccess($reservation);
 
         if ($reservation->getReservationStatus() !== 'en_cours') {
             return $this->json(['error' => 'Ce contrat n\'est pas en cours'], 400);
@@ -532,6 +554,7 @@ class LocationController extends AbstractController
         if (!$reservation) {
             return $this->json(['error' => 'Réservation introuvable'], 404);
         }
+        $this->assertBureauAccess($reservation);
         if ($reservation->getReservationStatus() !== 'en_cours') {
             return $this->json(['error' => 'La réservation n\'est pas en cours'], 400);
         }

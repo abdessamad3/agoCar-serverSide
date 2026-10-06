@@ -6,6 +6,7 @@ use App\Entity\Bureau;
 use App\Repository\BureauRepository;
 use App\Repository\CompanyRepository;
 use App\Repository\UtilisateurRepository;
+use App\Trait\BureauAwareTrait;
 use Doctrine\DBAL\Exception\ForeignKeyConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -19,6 +20,8 @@ use Symfony\Component\HttpKernel\KernelInterface;
 #[IsGranted('ROLE_USER')]
 class BureauController extends AbstractController
 {
+    use BureauAwareTrait;
+
     public function __construct(private KernelInterface $kernel) {}
 
     /**
@@ -95,6 +98,10 @@ class BureauController extends AbstractController
     #[Route('/{id}', name: 'show', methods: ['GET'])]
     public function show(Bureau $bureau): JsonResponse
     {
+        $bureauId = $this->getEffectiveBureauId();
+        if ($bureauId !== null && $bureau->getId() !== $bureauId) {
+            throw $this->createNotFoundException('Bureau introuvable');
+        }
         try {
             return $this->json([
                 'id'         => $bureau->getId(),

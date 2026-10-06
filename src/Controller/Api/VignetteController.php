@@ -38,6 +38,18 @@ class VignetteController extends AbstractController
         private FleetLifecycleManager     $flm,
     ) {}
 
+    /** Bureau-locked staff/managers may only touch vignette records belonging to
+     *  their own bureau. True admins (getEffectiveBureauId() === null) are unrestricted. */
+    private function assertBureauAccess(Vignette $vignette): void
+    {
+        $bureauId = $this->getEffectiveBureauId();
+        if ($bureauId === null) return;
+
+        if ($vignette->getDepense()?->getVoiture()?->getBureau()?->getId() !== $bureauId) {
+            throw $this->createNotFoundException('Vignette introuvable');
+        }
+    }
+
     private function snapshotVignette(Vignette $v): array
     {
         $dep = $v->getDepense();
@@ -103,6 +115,7 @@ class VignetteController extends AbstractController
     #[Route('/{id}', name: 'show', methods: ['GET'])]
     public function show(Vignette $vignette): JsonResponse
     {
+        $this->assertBureauAccess($vignette);
         return $this->json($this->serialize($vignette));
     }
 
@@ -214,6 +227,7 @@ class VignetteController extends AbstractController
     #[Route('/{id}', name: 'update', methods: ['PUT'])]
     public function update(Vignette $vignette, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertBureauAccess($vignette);
         $data    = json_decode($request->getContent(), true);
         $oldSnap = $this->snapshotVignette($vignette);
 
@@ -242,6 +256,7 @@ class VignetteController extends AbstractController
     #[Route('/{id}/renew', name: 'renew', methods: ['POST'])]
     public function renew(Vignette $vignette, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertBureauAccess($vignette);
         if ($vignette->getDeletedAt() !== null) {
             return $this->json(['error' => 'Vignette supprimée.'], 404);
         }
@@ -299,6 +314,7 @@ class VignetteController extends AbstractController
     #[Route('/{id}/file', name: 'upload_file', methods: ['POST'])]
     public function uploadFile(Vignette $vignette, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertBureauAccess($vignette);
         $file = $request->files->get('file');
         if (!$file) {
             return $this->json(['error' => 'Aucun fichier'], 400);
@@ -321,6 +337,7 @@ class VignetteController extends AbstractController
     #[Route('/{id}', name: 'delete', methods: ['DELETE'])]
     public function delete(Vignette $vignette, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertBureauAccess($vignette);
         $voiture = $vignette->getDepense()?->getVoiture();
         $snap    = $this->snapshotVignette($vignette);
         $id      = $vignette->getId();

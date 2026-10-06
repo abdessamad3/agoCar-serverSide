@@ -3,7 +3,9 @@
 namespace App\Controller\Api;
 
 use App\Entity\DeuxiemeChauffeur;
+use App\Entity\Paiement;
 use App\Entity\Reservation;
+use App\Enum\StatusEnum;
 use App\Repository\AccessoireRepository;
 use App\Repository\PaiementRepository;
 use App\Repository\ReservationRepository;
@@ -51,6 +53,19 @@ class ReservationController extends AbstractController
             'modePaiement'      => $r->getModePaiement(),
             'reservationStatus' => $r->getReservationStatus(),
         ];
+    }
+
+    /** Bureau-locked staff/managers may only touch reservations belonging to their own
+     *  bureau. True admins (getEffectiveBureauId() === null) are unrestricted. */
+    private function assertBureauAccess(Reservation $reservation): void
+    {
+        $bureauId = $this->getEffectiveBureauId();
+        if ($bureauId === null) return;
+
+        $resBureauId = $reservation->getVoiture()?->getBureau()?->getId();
+        if ($resBureauId !== $bureauId) {
+            throw $this->createNotFoundException('Réservation introuvable');
+        }
     }
 
     #[Route('', name: 'list', methods: ['GET'])]
@@ -113,6 +128,7 @@ class ReservationController extends AbstractController
     #[Route('/{id}', name: 'show', methods: ['GET'])]
     public function show(Reservation $reservation): JsonResponse
     {
+        $this->assertBureauAccess($reservation);
         $total     = (float) $reservation->getTotal();
         $dateDebut = $reservation->getDateDebut();
         $dateFin   = $reservation->getDateFin();
@@ -226,11 +242,12 @@ class ReservationController extends AbstractController
         $reservation = new Reservation();
         $reservation->setClient($client);
         $reservation->setVoiture($voiture);
+        $reservation->setBureau($bureau);
         $reservation->setDateDebut($dateDebut);
         $reservation->setDateFin($dateFin);
         $reservation->setTotal($data['total']);
         $reservation->setReservationStatus($data['reservationStatus'] ?? 'confirmed');
-        $reservation->setMontantPaye((string) ($data['montantPaye'] ?? 0));
+        $reservation->setMontantPaye('0');
         $reservation->setModePaiement($data['modePaiement'] ?? null);
         $reservation->setLieuLivraison($data['lieuLivraison'] ?? null);
         $reservation->setLieuRetour($data['lieuRetour'] ?? null);
@@ -258,6 +275,24 @@ class ReservationController extends AbstractController
 
         $em->persist($reservation);
         $em->flush();
+
+        // An initial payment taken at booking time gets a real Paiement record too —
+        // never just a raw number on the reservation with no audit trail behind it.
+        $montantInitial = (float) ($data['montantPaye'] ?? 0);
+        if ($montantInitial > 0) {
+            $paiement = new Paiement();
+            $paiement->setMontant((string) $montantInitial);
+            $paiement->setDatePaiement(new \DateTimeImmutable());
+            $paiement->setStatut(StatusEnum::PAYEE);
+            $paiement->setModePaiement($data['modePaiement'] ?? null);
+            $paiement->setNote('Paiement initial à la réservation');
+            $paiement->setCreeAu(new \DateTimeImmutable());
+            $paiement->setCreePar($this->getUser());
+            $paiement->setReservation($reservation);
+            $em->persist($paiement);
+            $reservation->setMontantPaye((string) $montantInitial);
+            $em->flush();
+        }
 
         // Cancel overlapping pending reservations and notify the confirming staff member
         if ($reservation->getReservationStatus() === 'confirmed') {
@@ -319,6 +354,7 @@ class ReservationController extends AbstractController
         VoitureRepository $voitureRepo,
         ReservationRepository $reservationRepo
     ): JsonResponse {
+        $this->assertBureauAccess($reservation);
         $data       = json_decode($request->getContent(), true) ?? [];
 
         // Optimistic concurrency: reject if the client's snapshot timestamp doesn't match DB
@@ -393,13 +429,28 @@ class ReservationController extends AbstractController
         }
 
         if (isset($data['reservationStatus']))  $reservation->setReservationStatus($data['reservationStatus']);
-        if (isset($data['montantPaye'])) {
+        if (isset($data['montantPaye']) && abs((float) $data['montantPaye'] - (float) $reservation->getMontantPaye()) > 0.001) {
             if ($this->paiementRepo->countByReservation($reservation->getId()) > 0) {
                 return $this->json([
                     'error' => 'Le montant payé ne peut pas être modifié directement car un historique de paiement existe. Utilisez l\'historique des paiements.'
                 ], 422);
             }
-            $reservation->setMontantPaye((string) $data['montantPaye']);
+            // No payment history yet -- give this first amount a real Paiement
+            // record instead of just stamping a raw number on the reservation.
+            $montant = (float) $data['montantPaye'];
+            if ($montant > 0) {
+                $paiement = new Paiement();
+                $paiement->setMontant((string) $montant);
+                $paiement->setDatePaiement(new \DateTimeImmutable());
+                $paiement->setStatut(StatusEnum::PAYEE);
+                $paiement->setModePaiement($data['modePaiement'] ?? $reservation->getModePaiement());
+                $paiement->setNote('Paiement initial à la réservation');
+                $paiement->setCreeAu(new \DateTimeImmutable());
+                $paiement->setCreePar($this->getUser());
+                $paiement->setReservation($reservation);
+                $em->persist($paiement);
+            }
+            $reservation->setMontantPaye((string) $montant);
         }
         if (isset($data['modePaiement']))       $reservation->setModePaiement($data['modePaiement']);
         if (array_key_exists('lieuLivraison', $data)) $reservation->setLieuLivraison($data['lieuLivraison']);
@@ -460,6 +511,7 @@ class ReservationController extends AbstractController
     #[Route('/{id}', name: 'delete', methods: ['DELETE'])]
     public function delete(Reservation $reservation, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertBureauAccess($reservation);
         $voiture = $reservation->getVoiture();
         $snap    = $this->snapshotReservation($reservation);
         $id      = $reservation->getId();

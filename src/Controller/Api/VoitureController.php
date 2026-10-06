@@ -196,6 +196,10 @@ class VoitureController extends AbstractController
     #[Route('/{id}', name: 'show', methods: ['GET'])]
     public function show(Voiture $voiture): JsonResponse
     {
+        $bureauId = $this->getEffectiveBureauId();
+        if ($bureauId !== null && $voiture->getBureau()?->getId() !== $bureauId) {
+            throw $this->createNotFoundException('Voiture introuvable');
+        }
         try {
             return $this->json([
                 'id'                       => $voiture->getId(),

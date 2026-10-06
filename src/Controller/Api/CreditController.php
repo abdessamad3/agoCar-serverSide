@@ -25,6 +25,18 @@ class CreditController extends AbstractController
     use BureauAwareTrait;
     use PaginationTrait;
 
+    /** Bureau-locked staff/managers may only touch legacy credits belonging to their
+     *  own bureau. True admins (getEffectiveBureauId() === null) are unrestricted. */
+    private function assertBureauAccess(Credit $credit): void
+    {
+        $bureauId = $this->getEffectiveBureauId();
+        if ($bureauId === null) return;
+
+        if ($credit->getVoiture()?->getBureau()?->getId() !== $bureauId) {
+            throw $this->createNotFoundException('Crédit introuvable');
+        }
+    }
+
     private function serialize(Credit $c, bool $withPaiements = false): array
     {
         $voit = $c->getVoiture();
@@ -79,6 +91,7 @@ class CreditController extends AbstractController
     #[Route('/{id}', name: 'show', methods: ['GET'])]
     public function show(Credit $credit): JsonResponse
     {
+        $this->assertBureauAccess($credit);
         return $this->json($this->serialize($credit, true));
     }
 
@@ -114,6 +127,7 @@ class CreditController extends AbstractController
     #[Route('/{id}', name: 'update', methods: ['PUT'])]
     public function update(Credit $credit, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertBureauAccess($credit);
         $data = json_decode($request->getContent(), true);
 
         if (isset($data['montantTotal'])) $credit->setMontantTotal($data['montantTotal']);
@@ -132,6 +146,7 @@ class CreditController extends AbstractController
     #[Route('/{id}', name: 'delete', methods: ['DELETE'])]
     public function delete(Credit $credit, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertBureauAccess($credit);
         $credit->setDeletedAt(new \DateTimeImmutable());
         $em->flush();
 

@@ -2,8 +2,10 @@
 
 namespace App\Controller\Api;
 
+use App\Entity\VehicleCredit;
 use App\Entity\VehicleCreditDocument;
 use App\Repository\VehicleCreditRepository;
+use App\Trait\BureauAwareTrait;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -13,6 +15,20 @@ use Symfony\Component\Routing\Annotation\Route;
 #[Route('/api/vehicle-credit-document', name: 'app_api_vc_document_')]
 class VehicleCreditDocumentController extends AbstractController
 {
+    use BureauAwareTrait;
+
+    /** Bureau-locked staff/managers may only touch credit documents belonging to
+     *  their own bureau. True admins (getEffectiveBureauId() === null) are unrestricted. */
+    private function assertBureauAccess(VehicleCredit $credit): void
+    {
+        $bureauId = $this->getEffectiveBureauId();
+        if ($bureauId === null) return;
+
+        if ($credit->getVoiture()?->getBureau()?->getId() !== $bureauId) {
+            throw $this->createNotFoundException('Contrat introuvable');
+        }
+    }
+
     private function serialize(VehicleCreditDocument $d): array
     {
         return [
@@ -46,6 +62,7 @@ class VehicleCreditDocumentController extends AbstractController
     ): JsonResponse {
         $credit = $creditRepo->find($request->request->get('vehicleCreditId') ?? 0);
         if (!$credit) return $this->json(['error' => 'Contrat introuvable'], 404);
+        $this->assertBureauAccess($credit);
 
         $file = $request->files->get('file');
         if (!$file) return $this->json(['error' => 'Aucun fichier'], 400);
@@ -73,6 +90,7 @@ class VehicleCreditDocumentController extends AbstractController
     #[Route('/{id}', name: 'delete', methods: ['DELETE'])]
     public function delete(VehicleCreditDocument $doc, EntityManagerInterface $em): JsonResponse
     {
+        if ($doc->getVehicleCredit()) $this->assertBureauAccess($doc->getVehicleCredit());
         $filePath = $this->getParameter('kernel.project_dir') . '/public' . $doc->getFilePath();
         if (file_exists($filePath)) unlink($filePath);
 

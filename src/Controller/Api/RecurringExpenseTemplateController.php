@@ -21,6 +21,18 @@ class RecurringExpenseTemplateController extends AbstractController
 
     private const REPETITIVE_TYPES = ['loyer', 'salaire', 'telephone', 'electricite', 'eau', 'internet', 'vignette'];
 
+    /** Bureau-locked staff/managers may only touch templates belonging to their own
+     *  bureau. True admins (getEffectiveBureauId() === null) are unrestricted. */
+    private function assertBureauAccess(RecurringExpenseTemplate $template): void
+    {
+        $bureauId = $this->getEffectiveBureauId();
+        if ($bureauId === null) return;
+
+        if ($template->getBureau()?->getId() !== $bureauId) {
+            throw $this->createNotFoundException('Modèle introuvable');
+        }
+    }
+
     private function serialize(RecurringExpenseTemplate $t): array
     {
         return [
@@ -109,6 +121,7 @@ class RecurringExpenseTemplateController extends AbstractController
         Request $request,
         EntityManagerInterface $em
     ): JsonResponse {
+        $this->assertBureauAccess($template);
         $data = json_decode($request->getContent(), true);
 
         if (array_key_exists('isActive', $data))    $template->setIsActive((bool)$data['isActive']);
@@ -124,6 +137,7 @@ class RecurringExpenseTemplateController extends AbstractController
     #[Route('/{id}', name: 'delete', methods: ['DELETE'])]
     public function delete(RecurringExpenseTemplate $template, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertBureauAccess($template);
         $em->remove($template);
         $em->flush();
         return $this->json(['message' => 'Template supprimé']);

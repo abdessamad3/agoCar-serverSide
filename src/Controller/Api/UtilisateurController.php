@@ -4,8 +4,8 @@ namespace App\Controller\Api;
 
 use App\Entity\Utilisateur;
 use App\Repository\BureauRepository;
-use App\Repository\CompanyRepository;
 use App\Repository\UtilisateurRepository;
+use App\Trait\BureauAwareTrait;
 use Doctrine\DBAL\Exception\ForeignKeyConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -19,13 +19,28 @@ use Symfony\Component\Validator\Validator\ValidatorInterface;
 #[Route('/api/utilisateur', name: 'app_api_utilisateur_')]
 class UtilisateurController extends AbstractController
 {
+    use BureauAwareTrait;
+
+    /** Bureau-locked staff/managers may only see/touch users in their own bureau.
+     *  True admins (getEffectiveBureauId() === null) are unrestricted. */
+    private function assertBureauAccess(Utilisateur $utilisateur): void
+    {
+        $bureauId = $this->getEffectiveBureauId();
+        if ($bureauId === null) return;
+
+        if ($utilisateur->getBureau()?->getId() !== $bureauId) {
+            throw $this->createNotFoundException('Utilisateur introuvable');
+        }
+    }
+
     #[Route('', name: 'list', methods: ['GET'])]
-public function list(Request $request, UtilisateurRepository $repo, CompanyRepository $companyRepo): JsonResponse
+public function list(Request $request, UtilisateurRepository $repo): JsonResponse
 {
     // Get query parameters
     $page   = max(1, (int) $request->query->get('page', 1));
     $limit  = min(200, max(1, (int) $request->query->get('limit', 20)));
     $search = $request->query->get('search', '');
+    $bureauId = $this->getEffectiveBureauId();
 
     // Build query with LEFT JOIN to avoid proxy EntityNotFoundException
     $qb = $repo->createQueryBuilder('u')
@@ -37,11 +52,17 @@ public function list(Request $request, UtilisateurRepository $repo, CompanyRepos
         $qb->andWhere('u.email LIKE :search')
            ->setParameter('search', '%' . $search . '%');
     }
+    if ($bureauId !== null) {
+        $qb->andWhere('u.bureau = :bureauId')->setParameter('bureauId', $bureauId);
+    }
 
     // Count total
     $qbCount = $repo->createQueryBuilder('u');
     if (!empty($search)) {
         $qbCount->andWhere('u.email LIKE :search')->setParameter('search', '%' . $search . '%');
+    }
+    if ($bureauId !== null) {
+        $qbCount->andWhere('u.bureau = :bureauId')->setParameter('bureauId', $bureauId);
     }
     $total = (int) $qbCount->select('COUNT(u.id)')->getQuery()->getSingleScalarResult();
 
@@ -54,16 +75,11 @@ public function list(Request $request, UtilisateurRepository $repo, CompanyRepos
         ->getQuery()
         ->getResult();
 
-    // Build managerId → company map
-    $managerCompanyMap = [];
-    foreach ($companyRepo->findAll() as $c) {
-        if ($c->getManager()) {
-            $managerCompanyMap[$c->getManager()->getId()] = ['id' => $c->getId(), 'nom' => $c->getNom()];
-        }
-    }
-
-    $data = array_map(function ($u) use ($managerCompanyMap) {
-        $company = $managerCompanyMap[$u->getId()] ?? null;
+    $data = array_map(function ($u) {
+        // Company follows the user's bureau, not a single per-company "manager"
+        // slot -- any number of people on the same bureau share its company.
+        $company = $u->getBureau()?->getCompany();
+        $company = $company ? ['id' => $company->getId(), 'nom' => $company->getNom()] : null;
         return [
             'id'         => $u->getId(),
             'email'      => $u->getEmail(),
@@ -73,6 +89,7 @@ public function list(Request $request, UtilisateurRepository $repo, CompanyRepos
             'photo'      => $u->getPhoto(),
             'roles'      => $u->getRoles(),
             'actif'      => $u->isActif(),
+            'langue'     => $u->getLangue(),
             'bureau'     => $u->getBureau()?->getId(),
             'bureauNom'  => $u->getBureau()?->getNom(),
             'companyId'  => $company['id'] ?? null,
@@ -132,6 +149,9 @@ public function list(Request $request, UtilisateurRepository $repo, CompanyRepos
         $utilisateur->setTelephone($data['telephone'] ?? null);
         $utilisateur->setRoles($data['roles']);
         $utilisateur->setActif($data['actif'] ?? true);
+        if (!empty($data['langue'])) {
+            $utilisateur->setLangue($data['langue']);
+        }
         $utilisateur->setCreeAu(new \DateTimeImmutable());
 
         if (!empty($data['bureauId'])) {
@@ -155,6 +175,7 @@ public function list(Request $request, UtilisateurRepository $repo, CompanyRepos
     #[Route('/{id}', name: 'show', methods: ['GET'])]
     public function show(Utilisateur $utilisateur): JsonResponse
     {
+        $this->assertBureauAccess($utilisateur);
         return $this->json([
             'id'             => $utilisateur->getId(),
             'email'          => $utilisateur->getEmail(),
@@ -164,6 +185,7 @@ public function list(Request $request, UtilisateurRepository $repo, CompanyRepos
             'photo'          => $utilisateur->getPhoto(),
             'roles'          => $utilisateur->getRoles(),
             'actif'          => $utilisateur->isActif(),
+            'langue'         => $utilisateur->getLangue(),
             'bureau'         => $utilisateur->getBureau()?->getId(),
             'bureauNom'      => $utilisateur->getBureau()?->getNom(),
             'hasSignature'   => $utilisateur->getSignatureBlob() !== null,
@@ -219,12 +241,17 @@ public function update(
     EntityManagerInterface $em,
     UserPasswordHasherInterface $hasher,
     BureauRepository $bureauRepo,
-    CompanyRepository $companyRepo,
     ValidatorInterface $validator
 ): JsonResponse {
     $data = json_decode($request->getContent(), true);
     $currentUser = $this->getUser();
     $isAdmin = in_array('ROLE_ADMIN', $currentUser->getRoles());
+    $isSelf  = $currentUser->getId() === $utilisateur->getId();
+
+    // Only admin or the account owner can modify profile fields at all
+    if (!$isAdmin && !$isSelf) {
+        return $this->json(['error' => 'Forbidden'], 403);
+    }
 
     // Only ADMIN can modify bureau
     if (array_key_exists('bureauId', $data)) {
@@ -286,25 +313,17 @@ public function update(
         $utilisateur->setActif((bool) $data['actif']);
     }
 
+    // Any user can set their own UI/email language preference.
+    if (isset($data['langue'])) {
+        $utilisateur->setLangue($data['langue']);
+    }
+
     if (array_key_exists('telephone', $data)) {
         $utilisateur->setTelephone($data['telephone'] ?: null);
     }
 
     if (array_key_exists('photo', $data)) {
         $utilisateur->setPhoto($data['photo'] ?: null);
-    }
-
-    if (array_key_exists('companyId', $data)) {
-        // Remove this user as manager from any previous company
-        foreach ($companyRepo->findBy(['manager' => $utilisateur]) as $prev) {
-            $prev->setManager(null);
-        }
-        if (!empty($data['companyId'])) {
-            $company = $companyRepo->find($data['companyId']);
-            if ($company) {
-                $company->setManager($utilisateur);
-            }
-        }
     }
 
     $utilisateur->setEditAu(new \DateTimeImmutable());

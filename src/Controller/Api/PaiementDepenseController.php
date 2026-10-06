@@ -2,6 +2,7 @@
 
 namespace App\Controller\Api;
 
+use App\Entity\Depense;
 use App\Entity\PaiementDepense;
 use App\Enum\PaymentTypeEnum;
 use App\Enum\PaymentMethodEnum;
@@ -9,6 +10,7 @@ use App\Repository\DepenseRepository;
 use App\Repository\PaiementDepenseRepository;
 use App\Service\ActivityLogService;
 use App\Service\DepensePaymentService;
+use App\Trait\BureauAwareTrait;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\File\Exception\FileException;
@@ -20,12 +22,26 @@ use Symfony\Component\String\Slugger\SluggerInterface;
 #[Route('/api/paiement-depense', name: 'app_api_paiement_depense_')]
 class PaiementDepenseController extends AbstractController
 {
+    use BureauAwareTrait;
+
     public function __construct(
         private DepensePaymentService     $paymentService,
         private PaiementDepenseRepository $paieRepo,
         private ActivityLogService        $activityLog,
         private SluggerInterface          $slugger,
     ) {}
+
+    /** Bureau-locked staff/managers may only touch expense payments belonging to
+     *  their own bureau. True admins (getEffectiveBureauId() === null) are unrestricted. */
+    private function assertDepenseBureauAccess(Depense $depense): void
+    {
+        $bureauId = $this->getEffectiveBureauId();
+        if ($bureauId === null) return;
+
+        if ($depense->getBureau()?->getId() !== $bureauId) {
+            throw $this->createNotFoundException('Dépense introuvable');
+        }
+    }
 
     private function serialize(PaiementDepense $p): array
     {
@@ -45,12 +61,14 @@ class PaiementDepenseController extends AbstractController
     }
 
     #[Route('', name: 'list', methods: ['GET'])]
-    public function list(Request $request): JsonResponse
+    public function list(Request $request, DepenseRepository $depenseRepo): JsonResponse
     {
         $depenseId = (int) $request->query->get('depenseId', 0);
         if (!$depenseId) {
             return $this->json(['error' => 'depenseId is required'], 400);
         }
+        $depense = $depenseRepo->find($depenseId);
+        if ($depense) $this->assertDepenseBureauAccess($depense);
         $items = $this->paieRepo->findByDepense($depenseId);
         return $this->json(array_map(fn($p) => $this->serialize($p), $items));
     }
@@ -64,6 +82,7 @@ class PaiementDepenseController extends AbstractController
         if (!$depense) {
             return $this->json(['error' => 'Dépense introuvable'], 404);
         }
+        $this->assertDepenseBureauAccess($depense);
 
         $montant     = (float) $request->request->get('montant', 0);
         $total       = (float) ($depense->getMontant() ?? 0);
@@ -148,6 +167,7 @@ class PaiementDepenseController extends AbstractController
     #[Route('/{id}', name: 'delete', methods: ['DELETE'])]
     public function delete(PaiementDepense $paiement, EntityManagerInterface $em): JsonResponse
     {
+        if ($paiement->getDepense()) $this->assertDepenseBureauAccess($paiement->getDepense());
         $depenseId = $paiement->getDepense()?->getId();
         $bureau    = $paiement->getDepense()?->getBureau();
         $snap      = [

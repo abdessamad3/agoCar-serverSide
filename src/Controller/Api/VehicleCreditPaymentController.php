@@ -8,6 +8,7 @@ use App\Entity\PaymentAttachment;
 use App\Repository\UtilisateurRepository;
 use App\Repository\VehicleCreditRepository;
 use App\Repository\VehicleCreditInstallmentRepository;
+use App\Trait\BureauAwareTrait;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -17,6 +18,21 @@ use Symfony\Component\Routing\Annotation\Route;
 #[Route('/api/vehicle-credit-payment', name: 'app_api_vc_payment_')]
 class VehicleCreditPaymentController extends AbstractController
 {
+    use BureauAwareTrait;
+
+    /** Bureau-locked staff/managers may only touch credit payments belonging to
+     *  their own bureau. True admins (getEffectiveBureauId() === null) are unrestricted. */
+    private function assertBureauAccess(VehicleCreditPayment $payment): void
+    {
+        $bureauId = $this->getEffectiveBureauId();
+        if ($bureauId === null) return;
+
+        $voitureBureauId = $payment->getVehicleCredit()?->getVoiture()?->getBureau()?->getId();
+        if ($voitureBureauId !== $bureauId) {
+            throw $this->createNotFoundException('Paiement introuvable');
+        }
+    }
+
     private function serialize(VehicleCreditPayment $p): array
     {
         return [
@@ -61,6 +77,7 @@ class VehicleCreditPaymentController extends AbstractController
     #[Route('/{id}', name: 'show', methods: ['GET'])]
     public function show(VehicleCreditPayment $payment): JsonResponse
     {
+        $this->assertBureauAccess($payment);
         return $this->json($this->serialize($payment));
     }
 
@@ -134,6 +151,7 @@ class VehicleCreditPaymentController extends AbstractController
     public function uploadAttachment(VehicleCreditPayment $payment, Request $request, EntityManagerInterface $em): JsonResponse
     {
         $this->denyAccessUnlessGranted('ROLE_MANAGER');
+        $this->assertBureauAccess($payment);
 
         $file = $request->files->get('file');
         if (!$file) return $this->json(['error' => 'Aucun fichier fourni.'], 400);
@@ -173,6 +191,7 @@ class VehicleCreditPaymentController extends AbstractController
     public function deleteAttachment(PaymentAttachment $attachment, EntityManagerInterface $em): JsonResponse
     {
         $this->denyAccessUnlessGranted('ROLE_MANAGER');
+        if ($attachment->getPayment()) $this->assertBureauAccess($attachment->getPayment());
 
         $diskPath = $this->getParameter('kernel.project_dir') . '/public' . $attachment->getFilePath();
         if (file_exists($diskPath)) {
@@ -188,6 +207,7 @@ class VehicleCreditPaymentController extends AbstractController
     #[Route('/{id}', name: 'delete', methods: ['DELETE'])]
     public function delete(VehicleCreditPayment $payment, EntityManagerInterface $em, UtilisateurRepository $userRepo): JsonResponse
     {
+        $this->assertBureauAccess($payment);
         $credit      = $payment->getVehicleCredit();
         $installment = $payment->getInstallment();
         $amount      = (float) $payment->getAmount();

@@ -27,6 +27,18 @@ class HistoriquePaiementController extends AbstractController
     use BureauAwareTrait;
     use PaginationTrait;
 
+    /** Bureau-locked staff/managers may only touch payment history belonging to their
+     *  own bureau. True admins (getEffectiveBureauId() === null) are unrestricted. */
+    private function assertReservationBureauAccess(\App\Entity\Reservation $reservation): void
+    {
+        $bureauId = $this->getEffectiveBureauId();
+        if ($bureauId === null) return;
+
+        if ($reservation->getVoiture()?->getBureau()?->getId() !== $bureauId) {
+            throw $this->createNotFoundException('Réservation introuvable');
+        }
+    }
+
     private function serialize(HistoriquePaiement $p): array
     {
         $res = $p->getReservation();
@@ -84,6 +96,7 @@ class HistoriquePaiementController extends AbstractController
         if (!$reservation) {
             return $this->json(['error' => 'Réservation introuvable'], 404);
         }
+        $this->assertReservationBureauAccess($reservation);
 
         $montant = (float) ($data['montant'] ?? 0);
         if ($montant <= 0) {
@@ -111,6 +124,7 @@ class HistoriquePaiementController extends AbstractController
     public function delete(HistoriquePaiement $hp, EntityManagerInterface $em): JsonResponse
     {
         $reservation = $hp->getReservation();
+        if ($reservation) $this->assertReservationBureauAccess($reservation);
         $hp->setDeletedAt(new \DateTimeImmutable());
         $em->flush();
 

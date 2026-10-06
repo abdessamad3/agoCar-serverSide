@@ -67,6 +67,13 @@ class CompanyController extends AbstractController
     #[Route('/{id}', name: 'show', methods: ['GET'])]
     public function show(Company $company): JsonResponse
     {
+        $user    = $this->getUser();
+        $isAdmin = in_array('ROLE_ADMIN', $user->getRoles());
+        $isMember = $company->getManager()?->getId() === $user->getId()
+            || $company->getStaff()->exists(fn($i, $u) => $u->getId() === $user->getId());
+        if (!$isAdmin && !$isMember) {
+            throw $this->createNotFoundException('Company introuvable');
+        }
         return $this->json($this->serialize($company));
     }
 

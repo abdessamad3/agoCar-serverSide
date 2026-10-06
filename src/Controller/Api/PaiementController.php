@@ -28,6 +28,19 @@ class PaiementController extends AbstractController
 
     public function __construct(private ActivityLogService $activityLog) {}
 
+    /** Bureau-locked staff/managers may only touch payments belonging to their own
+     *  bureau (via the reservation's or credit's vehicle). True admins are unrestricted. */
+    private function assertBureauAccess(Paiement $paiement): void
+    {
+        $bureauId = $this->getEffectiveBureauId();
+        if ($bureauId === null) return;
+
+        $voiture = $paiement->getReservation()?->getVoiture() ?? $paiement->getCredit()?->getVoiture();
+        if ($voiture?->getBureau()?->getId() !== $bureauId) {
+            throw $this->createNotFoundException('Paiement introuvable');
+        }
+    }
+
     private function snapshot(Paiement $p): array
     {
         return [
@@ -102,6 +115,7 @@ class PaiementController extends AbstractController
     #[Route('/{id}', name: 'show', methods: ['GET'])]
     public function show(Paiement $paiement): JsonResponse
     {
+        $this->assertBureauAccess($paiement);
         return $this->json($this->serialize($paiement));
     }
 
@@ -163,6 +177,7 @@ class PaiementController extends AbstractController
     #[Route('/{id}', name: 'update', methods: ['PUT'])]
     public function update(Paiement $paiement, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertBureauAccess($paiement);
         $data    = json_decode($request->getContent(), true);
         $oldSnap = $this->snapshot($paiement);
 
@@ -188,6 +203,7 @@ class PaiementController extends AbstractController
     #[Route('/{id}', name: 'delete', methods: ['DELETE'])]
     public function delete(Paiement $paiement, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertBureauAccess($paiement);
         $oldSnap     = $this->snapshot($paiement);
         $reservation = $paiement->getReservation();
         $id          = $paiement->getId();

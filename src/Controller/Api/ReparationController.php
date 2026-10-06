@@ -36,6 +36,18 @@ class ReparationController extends AbstractController
         private FleetLifecycleManager     $flm,
     ) {}
 
+    /** Bureau-locked staff/managers may only touch repair records belonging to their
+     *  own bureau. True admins (getEffectiveBureauId() === null) are unrestricted. */
+    private function assertBureauAccess(Reparation $reparation): void
+    {
+        $bureauId = $this->getEffectiveBureauId();
+        if ($bureauId === null) return;
+
+        if ($reparation->getDepense()?->getVoiture()?->getBureau()?->getId() !== $bureauId) {
+            throw $this->createNotFoundException('Réparation introuvable');
+        }
+    }
+
     private function serialize(Reparation $r): array
     {
         $dep  = $r->getDepense();
@@ -97,6 +109,7 @@ class ReparationController extends AbstractController
     #[Route('/{id}', name: 'show', methods: ['GET'])]
     public function show(Reparation $reparation): JsonResponse
     {
+        $this->assertBureauAccess($reparation);
         return $this->json($this->serialize($reparation));
     }
 
@@ -161,6 +174,7 @@ class ReparationController extends AbstractController
     #[Route('/{id}', name: 'update', methods: ['PUT'])]
     public function update(Reparation $reparation, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertBureauAccess($reparation);
         $data = json_decode($request->getContent(), true);
 
         if (isset($data['descriptionTechnique'])) $reparation->setDescriptionTechnique($data['descriptionTechnique']);
@@ -190,6 +204,7 @@ class ReparationController extends AbstractController
     #[Route('/{id}', name: 'delete', methods: ['DELETE'])]
     public function delete(Reparation $reparation, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertBureauAccess($reparation);
         $voiture = $reparation->getDepense()?->getVoiture();
         $reparation->setDeletedAt(new \DateTimeImmutable());
         if ($reparation->getDepense()) {

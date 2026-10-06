@@ -26,6 +26,28 @@ class VehicleReturnInspectionController extends AbstractController
     use BureauAwareTrait;
     use PaginationTrait;
 
+    /** Bureau-locked staff/managers may only touch inspections belonging to their own
+     *  bureau. True admins (getEffectiveBureauId() === null) are unrestricted. */
+    private function assertBureauAccess(VehicleReturnInspection $inspection): void
+    {
+        $bureauId = $this->getEffectiveBureauId();
+        if ($bureauId === null) return;
+
+        if ($inspection->getReservation()?->getVoiture()?->getBureau()?->getId() !== $bureauId) {
+            throw $this->createNotFoundException('Inspection introuvable');
+        }
+    }
+
+    private function assertReservationBureauAccess(\App\Entity\Reservation $reservation): void
+    {
+        $bureauId = $this->getEffectiveBureauId();
+        if ($bureauId === null) return;
+
+        if ($reservation->getVoiture()?->getBureau()?->getId() !== $bureauId) {
+            throw $this->createNotFoundException('Réservation introuvable');
+        }
+    }
+
     private function serialize(VehicleReturnInspection $i, ?int $kmDepart = null): array
     {
         $res  = $i->getReservation();
@@ -129,6 +151,7 @@ class VehicleReturnInspectionController extends AbstractController
         if (!$reservation) {
             return $this->json(null, Response::HTTP_OK);
         }
+        $this->assertReservationBureauAccess($reservation);
 
         $inspection = $inspectionRepo->findOneBy(['reservation' => $reservation]);
         if (!$inspection) {
@@ -143,6 +166,7 @@ class VehicleReturnInspectionController extends AbstractController
     #[Route('/{id}', name: 'show', methods: ['GET'], requirements: ['id' => '\d+'])]
     public function show(VehicleReturnInspection $inspection, VehicleDeliveryRepository $deliveryRepo): JsonResponse
     {
+        $this->assertBureauAccess($inspection);
         $kmDepart = $this->getKmDepartForReservation($inspection->getReservation()->getId(), $deliveryRepo);
 
         return $this->json($this->serialize($inspection, $kmDepart));
@@ -164,6 +188,7 @@ class VehicleReturnInspectionController extends AbstractController
         if (!$reservation) {
             return $this->json(['error' => 'Réservation introuvable.'], Response::HTTP_NOT_FOUND);
         }
+        $this->assertReservationBureauAccess($reservation);
 
         if ($reservation->getReservationStatus() !== 'en_cours') {
             return $this->json(
@@ -191,6 +216,7 @@ class VehicleReturnInspectionController extends AbstractController
         Request $request,
         EntityManagerInterface $em
     ): JsonResponse {
+        $this->assertBureauAccess($inspection);
         $data = json_decode($request->getContent(), true) ?? [];
         $this->applyData($inspection, $data, $em);
         $inspection->setEditAu(new \DateTimeImmutable());
@@ -206,6 +232,7 @@ class VehicleReturnInspectionController extends AbstractController
         VehicleDeliveryRepository $deliveryRepo,
         NotificationService $notificationService
     ): JsonResponse {
+        $this->assertBureauAccess($inspection);
         $reservation = $inspection->getReservation();
 
         if ($reservation->getReservationStatus() === 'terminee') {
@@ -271,6 +298,7 @@ class VehicleReturnInspectionController extends AbstractController
     #[Route('/{id}', name: 'delete', methods: ['DELETE'], requirements: ['id' => '\d+'])]
     public function delete(VehicleReturnInspection $inspection, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertBureauAccess($inspection);
         $em->remove($inspection);
         $em->flush();
 

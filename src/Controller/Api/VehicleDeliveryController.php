@@ -24,6 +24,28 @@ class VehicleDeliveryController extends AbstractController
     use BureauAwareTrait;
     use PaginationTrait;
 
+    /** Bureau-locked staff/managers may only touch deliveries belonging to their own
+     *  bureau. True admins (getEffectiveBureauId() === null) are unrestricted. */
+    private function assertBureauAccess(VehicleDelivery $delivery): void
+    {
+        $bureauId = $this->getEffectiveBureauId();
+        if ($bureauId === null) return;
+
+        if ($delivery->getReservation()?->getVoiture()?->getBureau()?->getId() !== $bureauId) {
+            throw $this->createNotFoundException('Livraison introuvable');
+        }
+    }
+
+    private function assertReservationBureauAccess(\App\Entity\Reservation $reservation): void
+    {
+        $bureauId = $this->getEffectiveBureauId();
+        if ($bureauId === null) return;
+
+        if ($reservation->getVoiture()?->getBureau()?->getId() !== $bureauId) {
+            throw $this->createNotFoundException('Réservation introuvable');
+        }
+    }
+
     private function serialize(VehicleDelivery $d): array
     {
         $res  = $d->getReservation();
@@ -104,6 +126,7 @@ class VehicleDeliveryController extends AbstractController
         if (!$reservation) {
             return $this->json(null, Response::HTTP_OK);
         }
+        $this->assertReservationBureauAccess($reservation);
 
         $delivery = $deliveryRepo->findOneBy(['reservation' => $reservation]);
 
@@ -113,6 +136,7 @@ class VehicleDeliveryController extends AbstractController
     #[Route('/{id}', name: 'show', methods: ['GET'], requirements: ['id' => '\d+'])]
     public function show(VehicleDelivery $delivery): JsonResponse
     {
+        $this->assertBureauAccess($delivery);
         return $this->json($this->serialize($delivery));
     }
 
@@ -133,6 +157,7 @@ class VehicleDeliveryController extends AbstractController
         if (!$reservation) {
             return $this->json(['error' => 'Réservation introuvable'], Response::HTTP_NOT_FOUND);
         }
+        $this->assertReservationBureauAccess($reservation);
 
         $terminalStatuses = ['terminee', 'annulee', 'annule', 'cancelled'];
         if (in_array($reservation->getReservationStatus(), $terminalStatuses, true)) {
@@ -177,6 +202,7 @@ class VehicleDeliveryController extends AbstractController
     #[Route('/{id}', name: 'update', methods: ['PATCH'], requirements: ['id' => '\d+'])]
     public function update(VehicleDelivery $delivery, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertBureauAccess($delivery);
         $data = json_decode($request->getContent(), true) ?? [];
         $this->applyData($delivery, $data, $em);
         $delivery->setEditAu(new \DateTimeImmutable());
@@ -193,6 +219,7 @@ class VehicleDeliveryController extends AbstractController
     #[Route('/{id}', name: 'delete', methods: ['DELETE'], requirements: ['id' => '\d+'])]
     public function delete(VehicleDelivery $delivery, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertBureauAccess($delivery);
         $em->remove($delivery);
         $em->flush();
 

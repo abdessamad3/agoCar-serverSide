@@ -17,6 +17,18 @@ class AchatInstallmentController extends AbstractController
 {
     use BureauAwareTrait;
 
+    /** Bureau-locked staff/managers may only touch installments belonging to their own
+     *  bureau. True admins (getEffectiveBureauId() === null) are unrestricted. */
+    private function assertBureauAccess(AchatInstallment $installment): void
+    {
+        $bureauId = $this->getEffectiveBureauId();
+        if ($bureauId === null) return;
+
+        if ($installment->getAchatVoiture()?->getVoiture()?->getBureau()?->getId() !== $bureauId) {
+            throw $this->createNotFoundException('Échéance introuvable');
+        }
+    }
+
     private function serialize(AchatInstallment $i): array
     {
         $achat  = $i->getAchatVoiture();
@@ -91,6 +103,7 @@ class AchatInstallmentController extends AbstractController
     #[Route('/{id}', name: 'show', methods: ['GET'])]
     public function show(AchatInstallment $installment): JsonResponse
     {
+        $this->assertBureauAccess($installment);
         return $this->json($this->serialize($installment));
     }
 
@@ -100,6 +113,7 @@ class AchatInstallmentController extends AbstractController
         Request $request,
         EntityManagerInterface $em
     ): JsonResponse {
+        $this->assertBureauAccess($installment);
         $data = json_decode($request->getContent(), true);
 
         $paidAmount = (float) ($data['amountPaid'] ?? $installment->getAmount());
@@ -124,6 +138,7 @@ class AchatInstallmentController extends AbstractController
     #[Route('/{id}', name: 'update', methods: ['PUT'])]
     public function update(AchatInstallment $installment, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertBureauAccess($installment);
         $data = json_decode($request->getContent(), true);
 
         if (isset($data['status']))      $installment->setStatus($data['status']);
@@ -140,6 +155,7 @@ class AchatInstallmentController extends AbstractController
     #[Route('/{id}', name: 'delete', methods: ['DELETE'])]
     public function delete(AchatInstallment $installment, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertBureauAccess($installment);
         $em->remove($installment);
         $em->flush();
         return $this->json(['message' => 'Échéance supprimée.']);
