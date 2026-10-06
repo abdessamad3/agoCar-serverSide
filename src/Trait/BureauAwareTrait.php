@@ -19,6 +19,13 @@ use Symfony\Contracts\Service\Attribute\Required;
  * down to one bureau via ?bureauId= (the frontend's bureau-switcher already
  * sends this on every list request) -- an admin-only, self-chosen filter,
  * never reachable for staff/managers above.
+ * Any NON-admin who reaches this point (no bureau, not managing one) is a
+ * misconfigured account, not an admin -- it must NOT fall through to the
+ * same "null = unrestricted" result, or clearing a staff member's bureau
+ * would silently grant them god-mode across every bureau and company. They
+ * get 0 instead: a bureau ID that can never match a real row, so every
+ * existing "= :bureauId" / "!== $bureauId" check across the app correctly
+ * resolves to "sees nothing" without needing to special-case this value.
  */
 trait BureauAwareTrait
 {
@@ -53,14 +60,17 @@ trait BureauAwareTrait
         if ($bureau) return $bureau->getId();
 
         // True admin (no bureau, not a bureau manager): honor an explicit,
-        // self-chosen filter if one was sent.
+        // self-chosen filter if one was sent, otherwise unrestricted (null).
         if (in_array('ROLE_ADMIN', $user->getRoles(), true)) {
             $raw = $this->bureauAwareRequestStack->getCurrentRequest()?->query->get('bureauId');
             if ($raw !== null && $raw !== '') {
                 return (int) $raw;
             }
+            return null;
         }
 
-        return null;
+        // Non-admin, no bureau, not managing one: misconfigured account.
+        // 0 never matches a real bureau, so this resolves to "sees nothing".
+        return 0;
     }
 }
