@@ -22,11 +22,14 @@ class UtilisateurController extends AbstractController
     use BureauAwareTrait;
 
     /** Bureau-locked staff/managers may only see/touch users in their own bureau.
+     *  Bureau-less users (bureau IS NULL) stay visible/reachable -- they're
+     *  company-wide/unassigned accounts, not another bureau's private roster.
      *  True admins (getEffectiveBureauId() === null) are unrestricted. */
     private function assertBureauAccess(Utilisateur $utilisateur): void
     {
         $bureauId = $this->getEffectiveBureauId();
         if ($bureauId === null) return;
+        if ($utilisateur->getBureau() === null) return;
 
         if ($utilisateur->getBureau()?->getId() !== $bureauId) {
             throw $this->createNotFoundException('Utilisateur introuvable');
@@ -53,7 +56,11 @@ public function list(Request $request, UtilisateurRepository $repo): JsonRespons
            ->setParameter('search', '%' . $search . '%');
     }
     if ($bureauId !== null) {
-        $qb->andWhere('u.bureau = :bureauId')->setParameter('bureauId', $bureauId);
+        // Bureau-less users (bureau IS NULL) stay visible to everyone -- they're
+        // company-wide/unassigned accounts, not another bureau's private roster,
+        // and SQL's "=" never matches NULL so they'd otherwise vanish for every
+        // bureau-locked viewer the moment their bureau is cleared.
+        $qb->andWhere('u.bureau = :bureauId OR u.bureau IS NULL')->setParameter('bureauId', $bureauId);
     }
 
     // Count total
@@ -62,7 +69,7 @@ public function list(Request $request, UtilisateurRepository $repo): JsonRespons
         $qbCount->andWhere('u.email LIKE :search')->setParameter('search', '%' . $search . '%');
     }
     if ($bureauId !== null) {
-        $qbCount->andWhere('u.bureau = :bureauId')->setParameter('bureauId', $bureauId);
+        $qbCount->andWhere('u.bureau = :bureauId OR u.bureau IS NULL')->setParameter('bureauId', $bureauId);
     }
     $total = (int) $qbCount->select('COUNT(u.id)')->getQuery()->getSingleScalarResult();
 
