@@ -6,7 +6,6 @@
 parameters:
     mailer.sender: '%env(MAILER_SENDER)%'
     mailer.recipient: '%env(MAILER_RECIPIENT)%'
-    mailer.bcc: '%env(default::MAILER_BCC)%'
 
 services:
     # default configuration for services in *this* file
@@ -31,7 +30,6 @@ services:
         arguments:
             $senderEmail: '%mailer.sender%'
             $recipientEmail: '%mailer.recipient%'
-            $bccEmails: '%mailer.bcc%'
 
     App\Command\CheckRecurringExpensesCommand:
         arguments:
@@ -50,7 +48,3 @@ services:
     App\Controller\Api\AuthController:
         arguments:
             $loginLimiter: '@limiter.login'
-
-    App\Service\ContratPdfService:
-        arguments:
-            $projectDir: '%kernel.project_dir%'

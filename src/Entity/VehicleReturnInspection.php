@@ -83,6 +83,41 @@ class VehicleReturnInspection
         $this->damageItems = new ArrayCollection();
     }
 
+    /**
+     * Billed days from pickup to this inspection. If the inspection was logged
+     * more than a week past the planned return date, that gap is treated as a
+     * retroactively-backfilled record (inspectedAt = data-entry time, not the
+     * real return date) rather than genuine week+-long lateness, and billing
+     * falls back to the planned end date instead. Real lateness up to a week
+     * still bills from the actual inspectedAt.
+     */
+    public static function computeJoursFactures(
+        ?\DateTimeImmutable $dateDebut,
+        ?\DateTimeImmutable $dateFin,
+        ?\DateTimeImmutable $inspectedAt
+    ): ?int {
+        if (!$inspectedAt || !$dateDebut) return null;
+
+        $referenceEnd = $inspectedAt;
+        if ($dateFin) {
+            $overdueSeconds = $inspectedAt->getTimestamp() - $dateFin->getTimestamp();
+            if ($overdueSeconds > 7 * 86400) {
+                $referenceEnd = $dateFin;
+            }
+        }
+
+        $joursFactures = (int) ceil(($referenceEnd->getTimestamp() - $dateDebut->getTimestamp()) / 86400);
+
+        if ($dateFin) {
+            $overdue = $referenceEnd->getTimestamp() - $dateFin->getTimestamp();
+            if ($overdue > 7200) {
+                ++$joursFactures;
+            }
+        }
+
+        return max(1, $joursFactures);
+    }
+
     public function getId(): ?int { return $this->id; }
 
     public function getReservation(): Reservation { return $this->reservation; }

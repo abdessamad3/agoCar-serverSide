@@ -2,19 +2,37 @@
 
 namespace App\Controller\Api;
 
+use App\Entity\Contrat;
 use App\Entity\ContractExtension;
 use App\Repository\ContratRepository;
 use App\Repository\ContractExtensionRepository;
+use App\Trait\BureauAwareTrait;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Annotation\Route;
+use Symfony\Component\Security\Http\Attribute\IsGranted;
 
 #[Route('/api/contract-extension', name: 'app_api_ce_')]
+#[IsGranted('ROLE_USER')]
 class ContractExtensionController extends AbstractController
 {
+    use BureauAwareTrait;
+
+    /** Same bureau-lock as ContratController::assertBureauAccess(). */
+    private function assertBureauAccess(Contrat $contrat): void
+    {
+        $bureauId = $this->getEffectiveBureauId();
+        if ($bureauId === null) return;
+
+        $contratBureauId = $contrat->getReservation()?->getVoiture()?->getBureau()?->getId();
+        if ($contratBureauId !== $bureauId) {
+            throw $this->createNotFoundException('Contrat not found');
+        }
+    }
+
     private function serialize(ContractExtension $e): array
     {
         return [
@@ -29,10 +47,14 @@ class ContractExtensionController extends AbstractController
     }
 
     #[Route('', name: 'list', methods: ['GET'])]
-    public function list(Request $request, ContractExtensionRepository $repo): JsonResponse
+    public function list(Request $request, ContractExtensionRepository $repo, ContratRepository $contratRepo): JsonResponse
     {
         $contratId = $request->query->get('contratId');
-        $criteria  = $contratId ? ['contrat' => (int) $contratId] : [];
+        if ($contratId) {
+            $contrat = $contratRepo->find((int) $contratId);
+            if ($contrat) $this->assertBureauAccess($contrat);
+        }
+        $criteria = $contratId ? ['contrat' => (int) $contratId] : [];
         return $this->json(array_map(
             fn($e) => $this->serialize($e),
             $repo->findBy($criteria, ['dateFrom' => 'ASC'])
@@ -42,6 +64,7 @@ class ContractExtensionController extends AbstractController
     #[Route('/{id}', name: 'show', methods: ['GET'], requirements: ['id' => '\d+'])]
     public function show(ContractExtension $extension): JsonResponse
     {
+        $this->assertBureauAccess($extension->getContrat());
         return $this->json($this->serialize($extension));
     }
 
@@ -60,6 +83,7 @@ class ContractExtensionController extends AbstractController
         if (!$contrat) {
             return $this->json(['error' => 'Contrat not found'], Response::HTTP_NOT_FOUND);
         }
+        $this->assertBureauAccess($contrat);
         if (empty($data['dateFrom']) || empty($data['dateTo'])) {
             return $this->json(['error' => 'dateFrom and dateTo are required'], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
@@ -79,6 +103,7 @@ class ContractExtensionController extends AbstractController
     #[Route('/{id}', name: 'update', methods: ['PUT'], requirements: ['id' => '\d+'])]
     public function update(ContractExtension $extension, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertBureauAccess($extension->getContrat());
         $data = json_decode($request->getContent(), true) ?? [];
 
         if (isset($data['dateFrom'])) $extension->setDateFrom(new \DateTimeImmutable($data['dateFrom']));
@@ -92,6 +117,7 @@ class ContractExtensionController extends AbstractController
     #[Route('/{id}', name: 'delete', methods: ['DELETE'], requirements: ['id' => '\d+'])]
     public function delete(ContractExtension $extension, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertBureauAccess($extension->getContrat());
         $em->remove($extension);
         $em->flush();
         return $this->json(['message' => 'Extension supprimée']);

@@ -155,6 +155,8 @@ class LocationController extends AbstractController
 
         if (!empty($data['faitA'])) {
             $contrat->setFaitA($data['faitA']);
+        } elseif (!$contrat->getFaitA()) {
+            $contrat->setFaitA($voiture?->getBureau()?->getNom() ?? null);
         }
 
         // nbJoursFactures: use override if provided, else auto-compute from dates
@@ -612,17 +614,9 @@ class LocationController extends AbstractController
         $kmRetour   = $i->getKilometrage();
         $kmEffectue = ($kmDepart !== null && $kmRetour !== null) ? max(0, $kmRetour - $kmDepart) : null;
 
-        $joursFactures = null;
-        if ($i->getInspectedAt() && $res->getDateDebut()) {
-            $diffSeconds   = $i->getInspectedAt()->getTimestamp() - $res->getDateDebut()->getTimestamp();
-            $joursFactures = (int) ceil($diffSeconds / 86400);
-            if ($res->getDateFin()) {
-                $overdue = $i->getInspectedAt()->getTimestamp() - $res->getDateFin()->getTimestamp();
-                if ($overdue > 7200) {
-                    ++$joursFactures;
-                }
-            }
-        }
+        $joursFactures = VehicleReturnInspection::computeJoursFactures(
+            $res->getDateDebut(), $res->getDateFin(), $i->getInspectedAt()
+        );
 
         return [
             'id'                     => $i->getId(),

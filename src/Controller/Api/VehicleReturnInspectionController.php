@@ -35,21 +35,9 @@ class VehicleReturnInspectionController extends AbstractController
         $kmRetour   = $i->getKilometrage();
         $kmEffectue = ($kmDepart !== null && $kmRetour !== null) ? max(0, $kmRetour - $kmDepart) : null;
 
-        $deliveryDate = null;
-        $joursFactures = null;
-        if ($i->getInspectedAt() && $res->getDateDebut()) {
-            $deliveryDate  = $res->getDateDebut();
-            $diffSeconds   = $i->getInspectedAt()->getTimestamp() - $deliveryDate->getTimestamp();
-            $joursFactures = (int) ceil($diffSeconds / 86400);
-
-            // Extra day if return is more than 2 hours past planned return
-            if ($res->getDateFin()) {
-                $overdue = $i->getInspectedAt()->getTimestamp() - $res->getDateFin()->getTimestamp();
-                if ($overdue > 7200) {
-                    ++$joursFactures;
-                }
-            }
-        }
+        $joursFactures = VehicleReturnInspection::computeJoursFactures(
+            $res->getDateDebut(), $res->getDateFin(), $i->getInspectedAt()
+        );
 
         return [
             'id'                     => $i->getId(),

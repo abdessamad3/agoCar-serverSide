@@ -3,18 +3,13 @@
 namespace App\Controller\Api;
 
 use App\Entity\Contrat;
-use App\Entity\ConditionsContrat;
-use App\Entity\ParametresSociete;
 use App\Entity\VehicleDelivery;
 use App\Entity\VehicleReturnInspection;
 use App\Repository\ContratRepository;
 use App\Repository\PaiementRepository;
 use App\Repository\ReservationRepository;
-use App\Repository\ParametresSocieteRepository;
-use App\Repository\ConditionsContratRepository;
 use App\Repository\VehicleDeliveryRepository;
 use App\Repository\VehicleReturnInspectionRepository;
-use App\Service\ContratPdfService;
 use App\Trait\BureauAwareTrait;
 use App\Trait\PaginationTrait;
 use Doctrine\ORM\EntityManagerInterface;
@@ -31,8 +26,6 @@ class ContratController extends AbstractController
 {
     use BureauAwareTrait;
     use PaginationTrait;
-
-    public function __construct(private ContratPdfService $pdfService) {}
 
     private function serialize(Contrat $c): array
     {
@@ -145,9 +138,26 @@ class ContratController extends AbstractController
         return $this->json(['data' => array_map(fn($c) => $this->serialize($c), $items), 'meta' => $this->paginateMeta($total, $page)]);
     }
 
+    /**
+     * Bureau-locked staff/managers may only touch contracts belonging to their
+     * own bureau. True admins (getEffectiveBureauId() === null) are unrestricted,
+     * matching the existing list() behavior.
+     */
+    private function assertBureauAccess(Contrat $contrat): void
+    {
+        $bureauId = $this->getEffectiveBureauId();
+        if ($bureauId === null) return;
+
+        $contratBureauId = $contrat->getReservation()?->getVoiture()?->getBureau()?->getId();
+        if ($contratBureauId !== $bureauId) {
+            throw $this->createNotFoundException('Contrat not found');
+        }
+    }
+
     #[Route('/{id}', name: 'show', methods: ['GET'], requirements: ['id' => '\d+'])]
     public function show(Contrat $contrat): JsonResponse
     {
+        $this->assertBureauAccess($contrat);
         return $this->json($this->serialize($contrat));
     }
 
@@ -158,6 +168,7 @@ class ContratController extends AbstractController
         VehicleReturnInspectionRepository $returnRepo,
         PaiementRepository $paiementRepo
     ): JsonResponse {
+        $this->assertBureauAccess($contrat);
         $reservation = $contrat->getReservation();
 
         $delivery   = $deliveryRepo->findOneBy(['reservation' => $reservation]);
@@ -220,17 +231,9 @@ class ContratController extends AbstractController
         $kmRetour   = $i->getKilometrage();
         $kmEffectue = ($kmDepart !== null && $kmRetour !== null) ? max(0, $kmRetour - $kmDepart) : null;
 
-        $joursFactures = null;
-        if ($i->getInspectedAt() && $res->getDateDebut()) {
-            $diffSeconds   = $i->getInspectedAt()->getTimestamp() - $res->getDateDebut()->getTimestamp();
-            $joursFactures = (int) ceil($diffSeconds / 86400);
-            if ($res->getDateFin()) {
-                $overdue = $i->getInspectedAt()->getTimestamp() - $res->getDateFin()->getTimestamp();
-                if ($overdue > 7200) {
-                    ++$joursFactures;
-                }
-            }
-        }
+        $joursFactures = VehicleReturnInspection::computeJoursFactures(
+            $res->getDateDebut(), $res->getDateFin(), $i->getInspectedAt()
+        );
 
         return [
             'id'                     => $i->getId(),
@@ -377,6 +380,7 @@ class ContratController extends AbstractController
     #[Route('/{id}', name: 'update', methods: ['PUT'], requirements: ['id' => '\d+'])]
     public function update(Contrat $contrat, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertBureauAccess($contrat);
         $data = json_decode($request->getContent(), true) ?? [];
         $this->applyData($contrat, $data, $em, partial: true);
         $contrat->setEditAu(new \DateTimeImmutable());
@@ -388,36 +392,10 @@ class ContratController extends AbstractController
     #[Route('/{id}', name: 'delete', methods: ['DELETE'], requirements: ['id' => '\d+'])]
     public function delete(Contrat $contrat, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertBureauAccess($contrat);
         $em->remove($contrat);
         $em->flush();
         return $this->json(['message' => 'Contrat supprimé']);
-    }
-
-    #[Route('/{id}/pdf', name: 'pdf', methods: ['GET'], requirements: ['id' => '\d+'])]
-    public function pdf(
-        Contrat $contrat,
-        ParametresSocieteRepository $psRepo,
-        ConditionsContratRepository $ccRepo,
-        VehicleDeliveryRepository $deliveryRepo,
-        VehicleReturnInspectionRepository $returnRepo,
-        EntityManagerInterface $em
-    ): Response {
-        $ps = $psRepo->find(1);
-        if (!$ps) { $ps = new ParametresSociete(); $em->persist($ps); $em->flush(); }
-
-        $cc = $ccRepo->find(1);
-        if (!$cc) { $cc = new ConditionsContrat(); $em->persist($cc); $em->flush(); }
-
-        $delivery   = $deliveryRepo->findOneBy(['reservation' => $contrat->getReservation()]);
-        $returnInsp = $returnRepo->findOneBy(['reservation'   => $contrat->getReservation()]);
-
-        $pdfBinary = $this->pdfService->generate($contrat, $ps, $cc, $delivery, $returnInsp);
-        $numero    = preg_replace('/[^A-Za-z0-9\-]/', '', $contrat->getNumero());
-
-        return new Response($pdfBinary, Response::HTTP_OK, [
-            'Content-Type'        => 'application/pdf',
-            'Content-Disposition' => 'inline; filename="contrat-' . $numero . '.pdf"',
-        ]);
     }
 
     private function applyData(Contrat $contrat, array $data, EntityManagerInterface $em, bool $partial = false): void
