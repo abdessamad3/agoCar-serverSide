@@ -204,6 +204,21 @@ class LocationController extends AbstractController
 
         $em->persist($delivery);
 
+        // ── Create Damage records for each reported damaged part at hand-over ──
+        if (!empty($data['damagedParts']) && is_array($data['damagedParts'])) {
+            foreach ($data['damagedParts'] as $partId) {
+                if (!is_string($partId) || strlen($partId) > 30) {
+                    continue;
+                }
+                $damage = new Damage();
+                $damage->setVehicleDelivery($delivery);
+                $damage->setZone($partId);
+                $damage->setSeverity('scratch');
+                $damage->setStatus('open');
+                $em->persist($damage);
+            }
+        }
+
         // ── Update lieu on Reservation if provided ──────────────────────────
         if (!empty($data['lieuLivraison'])) {
             $reservation->setLieuLivraison($data['lieuLivraison']);
