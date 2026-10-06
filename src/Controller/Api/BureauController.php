@@ -157,7 +157,13 @@ class BureauController extends AbstractController
 
             if (!empty($data['managerId'])) {
                 $manager = $userRepo->find($data['managerId']);
-                if ($manager) $bureau->setManager($manager);
+                if ($manager) {
+                    $bureau->setManager($manager);
+                    // Access is read only from user.bureau now (BureauAwareTrait no
+                    // longer falls back to Bureau.manager) -- keep them in sync here
+                    // so assigning a manager still grants that bureau's data in one step.
+                    $manager->setBureau($bureau);
+                }
             }
 
             $em->persist($bureau);
@@ -201,7 +207,13 @@ class BureauController extends AbstractController
                 $bureau->setCompany($data['companyId'] ? $companyRepo->find($data['companyId']) : null);
             }
             if (array_key_exists('managerId', $data)) {
-                $bureau->setManager($data['managerId'] ? $userRepo->find($data['managerId']) : null);
+                $manager = $data['managerId'] ? $userRepo->find($data['managerId']) : null;
+                $bureau->setManager($manager);
+                // Only auto-grant on assignment, same reasoning as create(). Clearing a
+                // manager does NOT auto-clear their personal bureau -- they may still be
+                // legitimate staff there; that's a separate, explicit decision for an
+                // admin to make on the Users page if it's actually meant to revoke access.
+                if ($manager) $manager->setBureau($bureau);
             }
             
             $bureau->setEditAu(new \DateTimeImmutable());
