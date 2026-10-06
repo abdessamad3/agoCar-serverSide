@@ -22,14 +22,17 @@ class UtilisateurController extends AbstractController
     use BureauAwareTrait;
 
     /** Bureau-locked staff/managers may only see/touch users in their own bureau.
-     *  Bureau-less users (bureau IS NULL) stay visible/reachable -- they're
-     *  company-wide/unassigned accounts, not another bureau's private roster.
-     *  True admins (getEffectiveBureauId() === null) are unrestricted. */
+     *  Bureau-less users (bureau IS NULL) stay visible/reachable to a legitimately
+     *  bureau-assigned viewer -- they're company-wide/unassigned accounts, not
+     *  another bureau's private roster. True admins (getEffectiveBureauId() ===
+     *  null) are unrestricted. A misconfigured viewer (sentinel 0 -- bureau-less
+     *  non-admin) gets NO exception for this: they see nothing at all, same as
+     *  everywhere else in the app, not even other bureau-less accounts. */
     private function assertBureauAccess(Utilisateur $utilisateur): void
     {
         $bureauId = $this->getEffectiveBureauId();
         if ($bureauId === null) return;
-        if ($utilisateur->getBureau() === null) return;
+        if ($bureauId !== 0 && $utilisateur->getBureau() === null) return;
 
         if ($utilisateur->getBureau()?->getId() !== $bureauId) {
             throw $this->createNotFoundException('Utilisateur introuvable');
@@ -55,11 +58,15 @@ public function list(Request $request, UtilisateurRepository $repo): JsonRespons
         $qb->andWhere('u.email LIKE :search')
            ->setParameter('search', '%' . $search . '%');
     }
-    if ($bureauId !== null) {
-        // Bureau-less users (bureau IS NULL) stay visible to everyone -- they're
-        // company-wide/unassigned accounts, not another bureau's private roster,
-        // and SQL's "=" never matches NULL so they'd otherwise vanish for every
-        // bureau-locked viewer the moment their bureau is cleared.
+    if ($bureauId === 0) {
+        // Misconfigured viewer (bureau-less non-admin): sees nothing, not even
+        // other bureau-less accounts.
+        $qb->andWhere('1 = 0');
+    } elseif ($bureauId !== null) {
+        // Bureau-less users (bureau IS NULL) stay visible to a legitimately
+        // bureau-assigned viewer -- they're company-wide/unassigned accounts, not
+        // another bureau's private roster, and SQL's "=" never matches NULL so
+        // they'd otherwise vanish the moment their bureau is cleared.
         $qb->andWhere('u.bureau = :bureauId OR u.bureau IS NULL')->setParameter('bureauId', $bureauId);
     }
 
@@ -68,7 +75,9 @@ public function list(Request $request, UtilisateurRepository $repo): JsonRespons
     if (!empty($search)) {
         $qbCount->andWhere('u.email LIKE :search')->setParameter('search', '%' . $search . '%');
     }
-    if ($bureauId !== null) {
+    if ($bureauId === 0) {
+        $qbCount->andWhere('1 = 0');
+    } elseif ($bureauId !== null) {
         $qbCount->andWhere('u.bureau = :bureauId OR u.bureau IS NULL')->setParameter('bureauId', $bureauId);
     }
     $total = (int) $qbCount->select('COUNT(u.id)')->getQuery()->getSingleScalarResult();
@@ -267,6 +276,14 @@ public function update(
         }
 
         if ($data['bureauId'] === null || $data['bureauId'] === '' || $data['bureauId'] === 0) {
+            // Clearing bureau is only safe for a true admin -- for anyone else it
+            // silently locks them out of the whole app (they see nothing, by design),
+            // which looks like a bug rather than an intentional account change.
+            if (!in_array('ROLE_ADMIN', $utilisateur->getRoles(), true)) {
+                return $this->json([
+                    'error' => 'Impossible de retirer le bureau d\'un compte non-admin — cela le bloquerait entièrement. Assignez-lui d\'abord un autre bureau, ou passez-le en admin.'
+                ], 422);
+            }
             $utilisateur->setBureau(null);
         } else {
             $bureau = $bureauRepo->find($data['bureauId']);
