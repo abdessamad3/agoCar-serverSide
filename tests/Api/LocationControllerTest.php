@@ -82,4 +82,55 @@ final class LocationControllerTest extends ApiTestCase
 
         $this->assertSame(Response::HTTP_OK, $this->httpClient->getResponse()->getStatusCode());
     }
+
+    /**
+     * Happy path through the new ReservationLifecycleManager: hand over keys
+     * advances confirmed -> en_cours. (Kept as one request per test -- this
+     * test suite's loginUser()/stateless-JWT setup doesn't carry
+     * authentication across a second request in the same test method, a
+     * pre-existing harness limitation unrelated to this change.)
+     */
+    public function testHandOverKeysAdvancesStatusToEnCours(): void
+    {
+        $bureauA = $this->makeBureau('Bureau A');
+        $staffA  = $this->makeUser('staffA@test.local', ['ROLE_STAFF'], $bureauA);
+
+        $voitureA = $this->makeVoiture($bureauA, 'A-001');
+        $clientA  = $this->makeClientEntity('Client A');
+        $reservationA = $this->makeReservation($voitureA, $clientA, status: 'confirmed');
+
+        $this->httpClient->loginUser($staffA);
+        $this->httpClient->request(
+            'POST',
+            '/api/location/' . $reservationA->getId() . '/remettre-les-cles',
+            server: ['CONTENT_TYPE' => 'application/json'],
+            content: json_encode(['mileageOut' => 1000])
+        );
+
+        $this->assertSame(Response::HTTP_OK, $this->httpClient->getResponse()->getStatusCode(), $this->httpClient->getResponse()->getContent());
+        $this->em->refresh($reservationA);
+        $this->assertSame('en_cours', $reservationA->getReservationStatus());
+    }
+
+    public function testCloseContractAdvancesStatusToTerminee(): void
+    {
+        $bureauA = $this->makeBureau('Bureau A');
+        $staffA  = $this->makeUser('staffA@test.local', ['ROLE_STAFF'], $bureauA);
+
+        $voitureA = $this->makeVoiture($bureauA, 'A-001');
+        $clientA  = $this->makeClientEntity('Client A');
+        $reservationA = $this->makeReservation($voitureA, $clientA, status: 'en_cours');
+
+        $this->httpClient->loginUser($staffA);
+        $this->httpClient->request(
+            'POST',
+            '/api/location/' . $reservationA->getId() . '/cloture',
+            server: ['CONTENT_TYPE' => 'application/json'],
+            content: json_encode(['fuelLevelIn' => 'plein', 'kilometrage' => 1200])
+        );
+
+        $this->assertSame(Response::HTTP_OK, $this->httpClient->getResponse()->getStatusCode(), $this->httpClient->getResponse()->getContent());
+        $this->em->refresh($reservationA);
+        $this->assertSame('terminee', $reservationA->getReservationStatus());
+    }
 }

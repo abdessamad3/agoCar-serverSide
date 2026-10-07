@@ -6,6 +6,9 @@ use App\Entity\Damage;
 use App\Entity\Depense;
 use App\Entity\VehicleReturnInspection;
 use App\Enum\StatusEnum;
+use App\Fleet\Event\ReturnInspectionCompleted;
+use App\Fleet\FleetLifecycleManager;
+use App\Fleet\ReservationLifecycleManager;
 use App\Repository\ContratRepository;
 use App\Repository\ReservationRepository;
 use App\Repository\VehicleDeliveryRepository;
@@ -230,7 +233,9 @@ class VehicleReturnInspectionController extends AbstractController
         VehicleReturnInspection $inspection,
         EntityManagerInterface $em,
         VehicleDeliveryRepository $deliveryRepo,
-        NotificationService $notificationService
+        NotificationService $notificationService,
+        FleetLifecycleManager $flm,
+        ReservationLifecycleManager $reservationLifecycle
     ): JsonResponse {
         $this->assertBureauAccess($inspection);
         $reservation = $inspection->getReservation();
@@ -240,13 +245,9 @@ class VehicleReturnInspectionController extends AbstractController
         }
 
         // Close the contract
-        $reservation->setReservationStatus('terminee');
+        $reservationLifecycle->transition($reservation, 'terminee');
 
-        // Update vehicle mileage with return km
         $voiture = $reservation->getVoiture();
-        if ($inspection->getKilometrage() !== null && $voiture !== null) {
-            $voiture->setKilometrageActuel($inspection->getKilometrage());
-        }
 
         // Auto-create Depense for damages
         $damageCharge = (float) ($inspection->getDamageCharge() ?? 0);
@@ -271,6 +272,26 @@ class VehicleReturnInspectionController extends AbstractController
 
         $inspection->setEditAu(new \DateTimeImmutable());
         $em->flush();
+
+        // Voiture.voitureStatus (and kilometrageActuel, via its post-effect) may only be
+        // written via FleetLifecycleManager::applyEvent() — this endpoint used to write
+        // kilometrageActuel directly and never touch voitureStatus at all, silently leaving
+        // the vehicle's lifecycle state stale (still "rented") after this alternate
+        // close-contract path, unlike LocationController::cloture().
+        if ($voiture !== null) {
+            $flm->applyEvent($voiture, new ReturnInspectionCompleted(
+                $voiture->getId(),
+                $reservation->getId(),
+                $inspection->getId(),
+                (int) ($inspection->getKilometrage() ?? $voiture->getKilometrageActuel() ?? 0),
+                $inspection->getFuelLevelIn() ?? 'moyen',
+                (float) ($inspection->getFuelCharge() ?? 0),
+                (float) ($inspection->getLateCharge() ?? 0),
+                (float) ($inspection->getDamageCharge() ?? 0),
+                (float) ($inspection->getEquipmentCharge() ?? 0),
+                $inspection->getCondition(),
+            ));
+        }
 
         $restant = $reservation->getMontantRestant();
         if ($restant > 0) {

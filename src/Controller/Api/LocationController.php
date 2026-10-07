@@ -13,6 +13,7 @@ use App\Fleet\Event\RentalStarted;
 use App\Fleet\Event\ReturnInspectionCompleted;
 use App\Fleet\Event\TemporalSyncTriggered;
 use App\Fleet\FleetLifecycleManager;
+use App\Fleet\ReservationLifecycleManager;
 use App\Repository\ContratRepository;
 use App\Repository\PaiementRepository;
 use App\Repository\ReservationRepository;
@@ -38,6 +39,7 @@ class LocationController extends AbstractController
         private ComplianceService $compliance,
         private FleetLifecycleManager $flm,
         private ActivityLogService $activityLog,
+        private ReservationLifecycleManager $reservationLifecycle,
     ) {}
 
     /** Bureau-locked staff/managers may only touch reservations belonging to their own
@@ -247,11 +249,7 @@ class LocationController extends AbstractController
         }
 
         // ── Transition status ───────────────────────────────────────────────
-        $reservation->setReservationStatus('en_cours');
-        $reservation->setEditAu(new \DateTimeImmutable());
-        $em->persist($reservation);
-
-        $em->flush();
+        $this->reservationLifecycle->transition($reservation, 'en_cours');
 
         // Voiture.voitureStatus may only be written via FleetLifecycleManager::applyEvent()
         // (enforced by VoitureStatusWriteGuard) — it recomputes the correct lifecycle state
@@ -351,11 +349,7 @@ class LocationController extends AbstractController
         }
 
         // ── Transition status ───────────────────────────────────────────────
-        $reservation->setReservationStatus('terminee');
-        $reservation->setEditAu(new \DateTimeImmutable());
-        $em->persist($reservation);
-
-        $em->flush();
+        $this->reservationLifecycle->transition($reservation, 'terminee');
 
         // ── Optional final payment, collected at the moment the car is returned —
         // a normal Paiement row (shows up in the Paiements tab/history/debt totals exactly
@@ -447,18 +441,7 @@ class LocationController extends AbstractController
         }
 
         $em->remove($inspection);
-        $reservation->setReservationStatus('en_cours');
-        $reservation->setEditAu(new \DateTimeImmutable());
-        $em->persist($reservation);
-        $em->flush();
-
-        $this->activityLog->logUpdate(
-            'Reservation',
-            $reservation->getId(),
-            ['reservationStatus' => 'terminee'],
-            ['reservationStatus' => 'en_cours', 'action' => 'undo_cloture'],
-            $reservation->getBureau(),
-        );
+        $this->reservationLifecycle->transition($reservation, 'en_cours', ['action' => 'undo_cloture']);
 
         // Voiture.voitureStatus may only be written via FleetLifecycleManager::applyEvent() —
         // re-sync now that the reservation is active again (likely back to "rented").
@@ -515,18 +498,7 @@ class LocationController extends AbstractController
         }
 
         $em->remove($delivery);
-        $reservation->setReservationStatus('confirmed');
-        $reservation->setEditAu(new \DateTimeImmutable());
-        $em->persist($reservation);
-        $em->flush();
-
-        $this->activityLog->logUpdate(
-            'Reservation',
-            $reservation->getId(),
-            ['reservationStatus' => 'en_cours'],
-            ['reservationStatus' => 'confirmed', 'action' => 'undo_livraison'],
-            $reservation->getBureau(),
-        );
+        $this->reservationLifecycle->transition($reservation, 'confirmed', ['action' => 'undo_livraison']);
 
         // Voiture.voitureStatus may only be written via FleetLifecycleManager::applyEvent() —
         // re-sync now that the reservation is no longer actively delivered.
@@ -559,10 +531,7 @@ class LocationController extends AbstractController
             return $this->json(['error' => 'La réservation n\'est pas en cours'], 400);
         }
 
-        $reservation->setReservationStatus('termine_avant_terme');
-        $reservation->setEditAu(new \DateTimeImmutable());
-        $em->persist($reservation);
-        $em->flush();
+        $this->reservationLifecycle->transition($reservation, 'termine_avant_terme');
 
         // Voiture.voitureStatus may only be written via FleetLifecycleManager::applyEvent()
         // (enforced by VoitureStatusWriteGuard) — recomputes state from the now-closed
@@ -671,13 +640,6 @@ class LocationController extends AbstractController
             'taxes'               => (float) ($c->getTaxes() ?? 0),
             'creeAu'              => $c->getCreeAu()?->format('Y-m-d H:i:s'),
             'editAu'              => $c->getEditAu()?->format('Y-m-d H:i:s'),
-            'extensions'          => array_map(fn($e) => [
-                'id'       => $e->getId(),
-                'dateFrom' => $e->getDateFrom()?->format('Y-m-d'),
-                'dateTo'   => $e->getDateTo()?->format('Y-m-d'),
-                'nbJours'  => $e->getNbJours(),
-                'notes'    => $e->getNotes(),
-            ], $c->getExtensions()->toArray()),
         ];
     }
 

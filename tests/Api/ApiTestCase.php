@@ -31,10 +31,18 @@ abstract class ApiTestCase extends WebTestCase
         $this->httpClient = static::createClient();
         $this->em = static::getContainer()->get('doctrine')->getManager();
 
-        // Keep tests independent: wipe the handful of tables these fixtures touch.
+        // Keep tests independent: wipe every table any fixture or controller action under
+        // test can write to. Missing one here is a real trap -- TRUNCATE resets
+        // auto_increment, so a later test's freshly-created row can reuse an id that an
+        // untruncated table still has an orphaned row for (e.g. a Contrat left over from a
+        // previous test's reservation #1 silently attaching itself to the next test's own
+        // reservation #1), producing a failure that looks unrelated to what that test does.
         $conn = $this->em->getConnection();
         $conn->executeStatement('SET FOREIGN_KEY_CHECKS=0');
-        foreach (['reservation', 'voiture', 'client', 'utilisateur', 'bureau', 'company'] as $table) {
+        foreach ([
+            'reservation', 'voiture', 'client', 'utilisateur', 'bureau', 'company',
+            'contrat', 'vehicle_delivery', 'vehicle_return_inspection', 'damage', 'paiement',
+        ] as $table) {
             $conn->executeStatement("TRUNCATE TABLE `$table`");
         }
         $conn->executeStatement('SET FOREIGN_KEY_CHECKS=1');
@@ -81,7 +89,12 @@ abstract class ApiTestCase extends WebTestCase
         $voiture->setImmatriculation($immatriculation);
         $voiture->setBureau($bureau);
         $voiture->setAnnee(2024);
-        $voiture->setKilometrageActuel(0);
+        // Non-zero: FleetLifecycleManager::VehicleSnapshot::isSetupIncomplete()
+        // treats kilometrageActuel == 0 as "setup gate not cleared" (a real
+        // operational vehicle always has a real odometer reading), which would
+        // otherwise force a resync (TemporalSyncTriggered etc.) to resolve to
+        // SETUP -- not a valid transition from the 'disponible' status below.
+        $voiture->setKilometrageActuel(15000);
         $voiture->setTypeCarburant('essence');
         $voiture->setClimatisation(true);
         $voiture->setPrixJour('250.00');
@@ -107,7 +120,7 @@ abstract class ApiTestCase extends WebTestCase
         return $client;
     }
 
-    protected function makeReservation(Voiture $voiture, Client $client): Reservation
+    protected function makeReservation(Voiture $voiture, Client $client, string $status = 'confirmed'): Reservation
     {
         $reservation = new Reservation();
         $reservation->setVoiture($voiture);
@@ -115,7 +128,11 @@ abstract class ApiTestCase extends WebTestCase
         $reservation->setDateDebut(new \DateTimeImmutable('today'));
         $reservation->setDateFin(new \DateTimeImmutable('+2 days'));
         $reservation->setTotal('500.00');
-        $reservation->setReservationStatus('confirmed');
+        // Set before the first persist, same as any other initial field --
+        // ReservationStatusWriteGuard only fires on updates to an already-
+        // persisted row, so this does not need to go through
+        // ReservationLifecycleManager::transition().
+        $reservation->setReservationStatus($status);
         $reservation->setCreeAu(new \DateTimeImmutable());
         $this->em->persist($reservation);
         $this->em->flush();

@@ -12,6 +12,7 @@ use App\Repository\ReservationRepository;
 use App\Repository\ClientRepository;
 use App\Repository\VoitureRepository;
 use App\Fleet\FleetLifecycleManager;
+use App\Fleet\ReservationLifecycleManager;
 use App\Fleet\Event\TemporalSyncTriggered;
 use App\Service\ActivityLogService;
 use App\Service\ComplianceService;
@@ -39,6 +40,7 @@ class ReservationController extends AbstractController
         private ActivityLogService    $activityLog,
         private NotificationService   $notificationService,
         private FleetLifecycleManager $flm,
+        private ReservationLifecycleManager $reservationLifecycle,
     ) {}
 
     private function snapshotReservation(Reservation $r): array
@@ -302,11 +304,10 @@ class ReservationController extends AbstractController
                              . ($voiture->getImmatriculation() ? ' (' . $voiture->getImmatriculation() . ')' : '');
                 $clientLines = [];
                 foreach ($conflicts as $conflicting) {
-                    $conflicting->setReservationStatus('annulee');
+                    $this->reservationLifecycle->transition($conflicting, 'annulee', ['action' => 'auto_cancel_conflict']);
                     $clientLines[] = trim($conflicting->getClient()?->getNom() ?? 'Client inconnu')
                                    . ' - ' . ($conflicting->getClient()?->getTelephone() ?? '—');
                 }
-                $em->flush();
                 $staffUser = $this->getUser();
                 if ($staffUser instanceof \App\Entity\Utilisateur) {
                     $this->notificationService->create(
@@ -421,14 +422,20 @@ class ReservationController extends AbstractController
                 // Cancel overlapping pending reservations and collect client info for grouped notification
                 $conflicts = $reservationRepo->findConflictingPending($voiture->getId(), $dateDebut, $dateFin, $reservation->getId());
                 foreach ($conflicts as $conflicting) {
-                    $conflicting->setReservationStatus('annulee');
+                    $this->reservationLifecycle->transition($conflicting, 'annulee', ['action' => 'auto_cancel_conflict']);
                     $cancelledClientLines[] = trim($conflicting->getClient()?->getNom() ?? 'Client inconnu')
                                            . ' - ' . ($conflicting->getClient()?->getTelephone() ?? '—');
                 }
             }
         }
 
-        if (isset($data['reservationStatus']))  $reservation->setReservationStatus($data['reservationStatus']);
+        // Routed through ReservationLifecycleManager so an arbitrary status
+        // jump (e.g. pending -> terminee, skipping the whole rental workflow)
+        // is rejected instead of silently written.
+        if (isset($data['reservationStatus'])) {
+            $toStatus = $data['reservationStatus'] === 'confirmee' ? 'confirmed' : $data['reservationStatus'];
+            $this->reservationLifecycle->transition($reservation, $toStatus);
+        }
         if (isset($data['montantPaye']) && abs((float) $data['montantPaye'] - (float) $reservation->getMontantPaye()) > 0.001) {
             if ($this->paiementRepo->countByReservation($reservation->getId()) > 0) {
                 return $this->json([

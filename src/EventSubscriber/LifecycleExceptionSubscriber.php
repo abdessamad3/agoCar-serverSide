@@ -2,6 +2,7 @@
 
 namespace App\EventSubscriber;
 
+use App\Fleet\Exception\InvalidReservationTransitionException;
 use App\Fleet\Exception\InvalidTransitionException;
 use App\Fleet\Exception\LifecycleViolationException;
 use App\Service\ErrorLogService;
@@ -36,6 +37,15 @@ class LifecycleExceptionSubscriber implements EventSubscriberInterface
         $exception = $event->getThrowable();
 
         if ($exception instanceof LifecycleViolationException) {
+            $event->setResponse(new JsonResponse(
+                $exception->toApiError(),
+                JsonResponse::HTTP_UNPROCESSABLE_ENTITY,
+            ));
+            $event->stopPropagation();
+            return;
+        }
+
+        if ($exception instanceof InvalidReservationTransitionException) {
             $event->setResponse(new JsonResponse(
                 $exception->toApiError(),
                 JsonResponse::HTTP_UNPROCESSABLE_ENTITY,

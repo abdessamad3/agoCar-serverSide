@@ -3,6 +3,10 @@
 namespace App\Command;
 
 use App\Entity\Reservation;
+use App\Fleet\Event\TemporalSyncTriggered;
+use App\Fleet\Exception\InvalidReservationTransitionException;
+use App\Fleet\FleetLifecycleManager;
+use App\Fleet\ReservationLifecycleManager;
 use App\Service\NotificationService;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
@@ -14,21 +18,30 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 /**
  * Auto-advances reservation statuses based on date boundaries.
  *
- * confirmee  + dateDebut <= now              → en_cours
- * en_cours   + dateFin  <  now              → terminee
+ * confirmed  + dateDebut <= now <= dateFin    → en_cours
+ * en_cours   + dateFin  <  now                → terminee
+ *
+ * Routed through ReservationLifecycleManager (validated transition + guard +
+ * activity log) and FleetLifecycleManager (re-syncs the vehicle's lifecycle
+ * state) exactly like the manual endpoints — this command previously wrote
+ * reservationStatus directly, matched the legacy 'confirmee' spelling that
+ * no live write path produces anymore (so that half silently matched zero
+ * rows), and never touched Voiture.voitureStatus at all.
  *
  * Run every few minutes via cron:
  *   * * * * * php /path/to/project/bin/console reservation:sync-status >> /var/log/reservation_sync.log 2>&1
  */
 #[AsCommand(
     name:        'reservation:sync-status',
-    description: 'Auto-transitions confirmee→en_cours and en_cours→terminee based on dates.',
+    description: 'Auto-transitions confirmed→en_cours and en_cours→terminee based on dates.',
 )]
 class SyncReservationStatusCommand extends Command
 {
     public function __construct(
         private EntityManagerInterface $em,
-        private NotificationService    $notificationService,
+        private NotificationService $notificationService,
+        private ReservationLifecycleManager $reservationLifecycle,
+        private FleetLifecycleManager $flm,
     ) {
         parent::__construct();
     }
@@ -39,52 +52,65 @@ class SyncReservationStatusCommand extends Command
         $now = new \DateTimeImmutable();
 
         $started  = $this->transition(
-            fromStatus: 'confirmee',
-            toStatus:   'en_cours',
-            condition:  'r.dateDebut <= :now AND r.dateFin >= :now',
-            now:        $now,
+            fromStatuses: ['confirmed', 'confirmee'],
+            toStatus:     'en_cours',
+            condition:    'r.dateDebut <= :now AND r.dateFin >= :now',
+            now:          $now,
+            io:           $io,
         );
 
         $finished = $this->transition(
-            fromStatus: 'en_cours',
-            toStatus:   'terminee',
-            condition:  'r.dateFin < :now',
-            now:        $now,
+            fromStatuses: ['en_cours'],
+            toStatus:     'terminee',
+            condition:    'r.dateFin < :now',
+            now:          $now,
+            io:           $io,
         );
 
-        $this->em->flush();
-
         $io->success(sprintf(
-            '%d confirmee→en_cours, %d en_cours→terminee.',
+            '%d confirmed→en_cours, %d en_cours→terminee.',
             $started, $finished
         ));
 
         return Command::SUCCESS;
     }
 
+    /** @param string[] $fromStatuses */
     private function transition(
-        string $fromStatus,
+        array $fromStatuses,
         string $toStatus,
         string $condition,
         \DateTimeImmutable $now,
+        SymfonyStyle $io,
     ): int {
         $reservations = $this->em->createQueryBuilder()
             ->select('r')
             ->from(Reservation::class, 'r')
-            ->where('r.reservationStatus = :from')
+            ->where('r.reservationStatus IN (:from)')
             ->andWhere($condition)
-            ->setParameter('from', $fromStatus)
+            ->setParameter('from', $fromStatuses)
             ->setParameter('now', $now)
             ->getQuery()
             ->getResult();
 
+        $count = 0;
         foreach ($reservations as $r) {
-            $r->setReservationStatus($toStatus);
+            try {
+                $this->reservationLifecycle->transition($r, $toStatus, ['action' => 'auto_sync_date_based']);
+            } catch (InvalidReservationTransitionException $e) {
+                $io->warning(sprintf('[reservation:sync-status] Skipped reservation #%d: %s', $r->getId(), $e->getMessage()));
+                continue;
+            }
+            $count++;
+
+            $voiture = $r->getVoiture();
+            if ($voiture !== null) {
+                $this->flm->applyEvent($voiture, new TemporalSyncTriggered($voiture->getId(), $voiture->getBureau()?->getId()));
+            }
 
             if ($toStatus === 'terminee') {
                 $restant = $r->getMontantRestant();
                 if ($restant > 0) {
-                    $voiture  = $r->getVoiture();
                     $client   = $r->getClient();
                     $carLabel = $voiture
                         ? $voiture->getMarque() . ' ' . $voiture->getModele()
@@ -103,6 +129,6 @@ class SyncReservationStatusCommand extends Command
             }
         }
 
-        return count($reservations);
+        return $count;
     }
 }

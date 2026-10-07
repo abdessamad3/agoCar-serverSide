@@ -4,6 +4,9 @@ namespace App\Controller\Api;
 
 use App\Entity\Damage;
 use App\Entity\VehicleDelivery;
+use App\Fleet\Event\RentalStarted;
+use App\Fleet\FleetLifecycleManager;
+use App\Fleet\ReservationLifecycleManager;
 use App\Repository\ContratRepository;
 use App\Repository\ReservationRepository;
 use App\Repository\VehicleDeliveryRepository;
@@ -145,7 +148,9 @@ class VehicleDeliveryController extends AbstractController
         Request $request,
         EntityManagerInterface $em,
         ReservationRepository $reservationRepo,
-        VehicleDeliveryRepository $deliveryRepo
+        VehicleDeliveryRepository $deliveryRepo,
+        FleetLifecycleManager $flm,
+        ReservationLifecycleManager $reservationLifecycle
     ): JsonResponse {
         $data = json_decode($request->getContent(), true) ?? [];
 
@@ -172,9 +177,6 @@ class VehicleDeliveryController extends AbstractController
         if ($existing) {
             $this->applyData($existing, $data, $em);
             $existing->setEditAu(new \DateTimeImmutable());
-            if ($existing->getMileageOut() !== null) {
-                $reservation->getVoiture()?->setKilometrageActuel($existing->getMileageOut());
-            }
             $em->flush();
             return $this->json($this->serialize($existing), Response::HTTP_OK);
         }
@@ -183,18 +185,29 @@ class VehicleDeliveryController extends AbstractController
         $delivery->setReservation($reservation);
         $this->applyData($delivery, $data, $em);
 
-        // Only advance status when it's still at 'confirmed' (or the French
-        // spelling the dossier's "Confirmer" button writes).
-        if (in_array($reservation->getReservationStatus(), ['confirmed', 'confirmee'], true)) {
-            $reservation->setReservationStatus('en_cours');
-        }
-
-        if ($delivery->getMileageOut() !== null) {
-            $reservation->getVoiture()?->setKilometrageActuel($delivery->getMileageOut());
-        }
-
         $em->persist($delivery);
         $em->flush();
+
+        // Only advance status when it's still at 'confirmed' (or the French
+        // spelling the dossier's "Confirmer" button writes). Routed through
+        // ReservationLifecycleManager + FleetLifecycleManager::applyEvent() —
+        // this endpoint used to write reservationStatus directly and never
+        // touch Voiture.voitureStatus at all, silently leaving the vehicle's
+        // lifecycle state stale (never resynced to "rented"), unlike
+        // LocationController::remettreLesCles.
+        $voiture = $reservation->getVoiture();
+        if (in_array($reservation->getReservationStatus(), ['confirmed', 'confirmee', 'pending'], true)) {
+            $reservationLifecycle->transition($reservation, 'en_cours');
+            if ($voiture !== null) {
+                $flm->applyEvent($voiture, new RentalStarted(
+                    $voiture->getId(),
+                    $reservation->getId(),
+                    $delivery->getId(),
+                    (int) ($delivery->getMileageOut() ?? $voiture->getKilometrageActuel() ?? 0),
+                    $delivery->getFuelLevelOut() ?? 'vide',
+                ));
+            }
+        }
 
         return $this->json($this->serialize($delivery), Response::HTTP_CREATED);
     }
