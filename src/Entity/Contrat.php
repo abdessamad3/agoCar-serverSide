@@ -3,8 +3,6 @@
 namespace App\Entity;
 
 use App\Repository\ContratRepository;
-use Doctrine\Common\Collections\ArrayCollection;
-use Doctrine\Common\Collections\Collection;
 use Doctrine\ORM\Mapping as ORM;
 
 #[ORM\Entity(repositoryClass: ContratRepository::class)]
@@ -58,14 +56,6 @@ class Contrat
     #[ORM\JoinColumn(nullable: false, name: 'reservation_id')]
     private ?Reservation $reservation = null;
 
-    #[ORM\OneToMany(targetEntity: ContractExtension::class, mappedBy: 'contrat', cascade: ['persist', 'remove'])]
-    private Collection $extensions;
-
-    public function __construct()
-    {
-        $this->extensions = new ArrayCollection();
-    }
-
     #[ORM\PrePersist]
     public function onPrePersist(): void
     {
@@ -112,22 +102,4 @@ class Contrat
 
     public function getReservation(): ?Reservation { return $this->reservation; }
     public function setReservation(?Reservation $v): static { $this->reservation = $v; return $this; }
-
-    /** @return Collection<int, ContractExtension> */
-    public function getExtensions(): Collection { return $this->extensions; }
-
-    public function addExtension(ContractExtension $e): static
-    {
-        if (!$this->extensions->contains($e)) {
-            $this->extensions->add($e);
-            $e->setContrat($this);
-        }
-        return $this;
-    }
-
-    public function removeExtension(ContractExtension $e): static
-    {
-        $this->extensions->removeElement($e);
-        return $this;
-    }
 }

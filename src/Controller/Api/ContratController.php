@@ -48,13 +48,6 @@ class ContratController extends AbstractController
             'taxes'               => (float) $c->getTaxes(),
             'creeAu'              => $c->getCreeAu()?->format('Y-m-d H:i:s'),
             'editAu'              => $c->getEditAu()?->format('Y-m-d H:i:s'),
-            'extensions'          => array_map(fn($e) => [
-                'id'       => $e->getId(),
-                'dateFrom' => $e->getDateFrom()?->format('Y-m-d'),
-                'dateTo'   => $e->getDateTo()?->format('Y-m-d'),
-                'nbJours'  => $e->getNbJours(),
-                'notes'    => $e->getNotes(),
-            ], $c->getExtensions()->toArray()),
             'reservation' => $res ? [
                 'id'                => $res->getId(),
                 'dateDebut'         => $res->getDateDebut()?->format('Y-m-d H:i:s'),
