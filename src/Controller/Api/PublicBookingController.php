@@ -9,6 +9,7 @@ use App\Entity\Utilisateur;
 use App\Entity\Voiture;
 use App\Service\ActivityLogService;
 use App\Service\NotificationService;
+use App\Service\ReservationPricingService;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -34,6 +35,7 @@ class PublicBookingController extends AbstractController
         ActivityLogService $activityLog,
         MailerInterface $mailer,
         NotificationService $notifService,
+        ReservationPricingService $pricing,
     ): JsonResponse {
         $data = json_decode($request->getContent(), true) ?? [];
 
@@ -113,18 +115,17 @@ class PublicBookingController extends AbstractController
         $client->setCreeAu(new \DateTimeImmutable());
 
         // ── Reservation ───────────────────────────────────────────────────────
-        $days  = (int) $dateDebut->setTime(0, 0, 0)->diff($dateFin->setTime(0, 0, 0))->days;
-        $total = $voiture->getPrixJour() !== null
-            ? (string) round((float) $voiture->getPrixJour() * $days, 2)
-            : '0.00';
+        // Same authoritative computation as the admin app -- so a public booking placed
+        // during a seasonal rate period prices consistently with what staff will see.
+        $computed = $pricing->computeTotal($voiture, $dateDebut, $dateFin, [], null);
 
         $reservation = new Reservation();
         $reservation->setClient($client);
         $reservation->setVoiture($voiture);
         $reservation->setDateDebut($dateDebut);
         $reservation->setDateFin($dateFin);
-        $reservation->setTotal($total);
-        $reservation->setPrixParJour($voiture->getPrixJour());
+        $reservation->setTotal($computed['total']);
+        $reservation->setPrixParJour($computed['prixParJour']);
         $reservation->setLieuLivraison($booking->getLieuLivraison());
         $reservation->setReservationStatus('pending');
         $reservation->setBureau($voiture->getBureau());
@@ -149,12 +150,16 @@ class PublicBookingController extends AbstractController
         try {
             $recipients = $this->collectRecipients($em, $voiture);
             if (!empty($recipients)) {
-                $nights   = (int) $dateDebut->setTime(0, 0, 0)->diff($dateFin->setTime(0, 0, 0))->days;
-                $prixJour = $voiture->getPrixJour();
-                $total    = $prixJour !== null ? round((float) $prixJour * $nights) : null;
-                $ref      = '#' . str_pad((string) $booking->getId(), 6, '0', STR_PAD_LEFT);
+                $nights = (int) $dateDebut->setTime(0, 0, 0)->diff($dateFin->setTime(0, 0, 0))->days;
+                // Reuse the already-computed total (reflects seasonal rate rules) instead
+                // of recomputing from the vehicle's raw base rate -- this is exactly the
+                // "two places disagree" bug the whole pricing feature exists to prevent,
+                // and it was live: this email used to show the unadjusted price while the
+                // saved reservation had the correct, adjusted one.
+                $total = (float) $computed['total'];
+                $ref   = '#' . str_pad((string) $booking->getId(), 6, '0', STR_PAD_LEFT);
 
-                $html  = $this->buildEmailHtml($booking, $voiture, $nights, $total, $ref, $reservation->getId());
+                $html  = $this->buildEmailHtml($booking, $voiture, $nights, $total, $ref, $reservation->getId(), (float) $computed['prixParJour']);
                 $email = (new Email())
                     ->from($_ENV['MAILER_SENDER'] ?? 'noreply@agocar.ma')
                     ->subject("🚗 Nouvelle réservation {$ref} — {$voiture->getMarque()} {$voiture->getModele()}")
@@ -177,8 +182,7 @@ class PublicBookingController extends AbstractController
                 $ref      = '#' . str_pad((string) $booking->getId(), 6, '0', STR_PAD_LEFT);
                 $nights   = (int) $dateDebut->setTime(0, 0, 0)->diff($dateFin->setTime(0, 0, 0))->days;
                 $car      = trim(($voiture->getMarque() ?? '') . ' ' . ($voiture->getModele() ?? '') . ($voiture->getAnnee() ? ' ' . $voiture->getAnnee() : ''));
-                $prixJour = $voiture->getPrixJour();
-                $totalAmt = $prixJour !== null ? round((float) $prixJour * $nights) : null;
+                $totalAmt = (float) $computed['total'];
 
                 $notifTitle = "Nouvelle réservation {$ref}";
                 $notifMsg   = "{$car} — {$dateDebut->format('d/m/Y')} → {$dateFin->format('d/m/Y')} ({$nights} j)";
@@ -271,7 +275,8 @@ class PublicBookingController extends AbstractController
         int $nights,
         ?float $total,
         string $ref,
-        int $reservationId
+        int $reservationId,
+        ?float $effectiveDailyRate = null,
     ): string {
         $fmt = fn(?string $val): string => $val ?? '—';
 
@@ -279,7 +284,10 @@ class PublicBookingController extends AbstractController
         $depart   = $b->getDateDebut()->format('d/m/Y');
         $retour   = $b->getDateFin()->format('d/m/Y');
         $nightStr = $nights . ' jour' . ($nights > 1 ? 's' : '');
-        $prixJ    = $v->getPrixJour() !== null ? number_format((float) $v->getPrixJour(), 0, ',', ' ') . ' MAD/j' : '—';
+        // Effective rate (reflects any active seasonal rule), not the vehicle's raw base
+        // rate -- same reasoning as $total above.
+        $rateForDisplay = $effectiveDailyRate ?? ($v->getPrixJour() !== null ? (float) $v->getPrixJour() : null);
+        $prixJ    = $rateForDisplay !== null ? number_format($rateForDisplay, 0, ',', ' ') . ' MAD/j' : '—';
         $totalStr = $total !== null ? number_format($total, 0, ',', ' ') . ' MAD' : '—';
         $livraison = $b->getLieuLivraison() ? htmlspecialchars($b->getLieuLivraison()) : '—';
         $message   = $b->getMessage() ? nl2br(htmlspecialchars($b->getMessage())) : '<em style="color:#94a3b8">Aucun message</em>';

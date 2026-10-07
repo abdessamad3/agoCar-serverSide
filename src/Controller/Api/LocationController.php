@@ -330,6 +330,18 @@ class LocationController extends AbstractController
         $cautionRemboursee = max(0.0, $cautionMontant - $totalCharges + $remiseMontant);
         $inspection->setCautionRemboursee(number_format($cautionRemboursee, 2, '.', ''));
 
+        // Fold return-time charges (fuel/late/damage/equipment) and any remise into the
+        // reservation's actual total, now, once -- montantRestant/paymentStatus/balance are
+        // all derived strictly from total vs montantPaye (by design, so they can't drift), but
+        // nothing previously updated total here, so every other screen (client debt, reports,
+        // the reservations list) silently missed these charges; only this dossier's own Retour
+        // tab recomputed them for display. cloture() can only run once per reservation (guarded
+        // above by the en_cours precondition), so this can't double-apply on a re-close.
+        if ($totalCharges > 0 || $remiseMontant > 0) {
+            $netAdjustment = $totalCharges - $remiseMontant;
+            $reservation->setTotal(number_format((float) $reservation->getTotal() + $netAdjustment, 2, '.', ''));
+        }
+
         $em->persist($inspection);
 
         // ── Create Damage records for each reported damaged part ────────────

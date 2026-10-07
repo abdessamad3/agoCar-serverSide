@@ -68,6 +68,14 @@ class Reservation
     #[ORM\Column(type: 'decimal', precision: 10, scale: 2, nullable: true)]
     private ?string $prixParJour = null;
 
+    /** One-off discount applied to this specific reservation (never a reason-less edit to
+     *  total directly) — same shape as VehicleReturnInspection::remiseMontant/remiseMotif. */
+    #[ORM\Column(type: 'decimal', precision: 10, scale: 2, nullable: true, name: 'remise_montant')]
+    private ?string $remiseMontant = null;
+
+    #[ORM\Column(length: 255, nullable: true, name: 'remise_motif')]
+    private ?string $remiseMotif = null;
+
     #[ORM\OneToOne(targetEntity: DeuxiemeChauffeur::class, cascade: ['persist', 'remove'])]
     #[ORM\JoinColumn(nullable: true, name: 'deuxieme_chauffeur_id')]
     private ?DeuxiemeChauffeur $deuxiemeChauffeur = null;
@@ -252,6 +260,12 @@ class Reservation
 
     public function getPrixParJour(): ?string { return $this->prixParJour; }
     public function setPrixParJour(?string $v): static { $this->prixParJour = $v; return $this; }
+
+    public function getRemiseMontant(): ?string { return $this->remiseMontant; }
+    public function setRemiseMontant(?string $v): static { $this->remiseMontant = $v; return $this; }
+
+    public function getRemiseMotif(): ?string { return $this->remiseMotif; }
+    public function setRemiseMotif(?string $v): static { $this->remiseMotif = $v; return $this; }
 
     public function getDeuxiemeChauffeur(): ?DeuxiemeChauffeur { return $this->deuxiemeChauffeur; }
     public function setDeuxiemeChauffeur(?DeuxiemeChauffeur $v): static { $this->deuxiemeChauffeur = $v; return $this; }

@@ -17,6 +17,7 @@ use App\Fleet\Event\TemporalSyncTriggered;
 use App\Service\ActivityLogService;
 use App\Service\ComplianceService;
 use App\Service\NotificationService;
+use App\Service\ReservationPricingService;
 use App\Service\VoitureStatusService;
 use App\Trait\BureauAwareTrait;
 use App\Trait\PaginationTrait;
@@ -41,6 +42,7 @@ class ReservationController extends AbstractController
         private NotificationService   $notificationService,
         private FleetLifecycleManager $flm,
         private ReservationLifecycleManager $reservationLifecycle,
+        private ReservationPricingService $pricing,
     ) {}
 
     private function snapshotReservation(Reservation $r): array
@@ -134,7 +136,10 @@ class ReservationController extends AbstractController
         $total     = (float) $reservation->getTotal();
         $dateDebut = $reservation->getDateDebut();
         $dateFin   = $reservation->getDateFin();
-        $days = ($dateDebut && $dateFin) ? (int) $dateDebut->diff($dateFin)->days : 0;
+        // Shared with the pricing service so the displayed day count always matches what
+        // was actually billed (this used to truncate via diff()->days while billing used
+        // ceil() elsewhere, which could disagree by a day right at the boundary).
+        $days = ($dateDebut && $dateFin) ? $this->pricing->computeDays($dateDebut, $dateFin) : 0;
         $dc = $reservation->getDeuxiemeChauffeur();
 
         return $this->json([
@@ -164,6 +169,8 @@ class ReservationController extends AbstractController
             'lieuLivraison'     => $reservation->getLieuLivraison(),
             'lieuRetour'        => $reservation->getLieuRetour(),
             'total'             => $total,
+            'remiseMontant'     => $reservation->getRemiseMontant() !== null ? (float) $reservation->getRemiseMontant() : null,
+            'remiseMotif'       => $reservation->getRemiseMotif(),
             'montantPaye'       => (float) $reservation->getMontantPaye(),
             'montantRestant'    => $reservation->getMontantRestant(),
             'montantSurpaye'    => $reservation->getMontantSurpaye(),
@@ -247,19 +254,14 @@ class ReservationController extends AbstractController
         $reservation->setBureau($bureau);
         $reservation->setDateDebut($dateDebut);
         $reservation->setDateFin($dateFin);
-        $reservation->setTotal($data['total']);
         $reservation->setReservationStatus($data['reservationStatus'] ?? 'confirmed');
         $reservation->setMontantPaye('0');
         $reservation->setModePaiement($data['modePaiement'] ?? null);
         $reservation->setLieuLivraison($data['lieuLivraison'] ?? null);
         $reservation->setLieuRetour($data['lieuRetour'] ?? null);
-        if (isset($data['prixParJour'])) {
-            $reservation->setPrixParJour((string)(float)$data['prixParJour']);
-        } elseif ($voiture->getPrixJour() !== null) {
-            // Frontend doesn't always send prixParJour explicitly — fall back to the vehicle's
-            // own daily rate so the dossier never shows "null MAD" for the daily rate.
-            $reservation->setPrixParJour($voiture->getPrixJour());
-        }
+        $reservation->setRemiseMontant(isset($data['remiseMontant']) && $data['remiseMontant'] !== '' && $data['remiseMontant'] !== null
+            ? number_format((float) $data['remiseMontant'], 2, '.', '') : null);
+        $reservation->setRemiseMotif($data['remiseMotif'] ?? null);
         $reservation->setCreeAu(new \DateTimeImmutable());
 
         if (!empty($data['deuxiemeChauffeur']) && is_array($data['deuxiemeChauffeur'])) {
@@ -272,6 +274,15 @@ class ReservationController extends AbstractController
             $acc = $accessoireRepo->find((int) $accId);
             if ($acc) $reservation->addAccessoire($acc);
         }
+
+        // Total/prixParJour are always server-computed -- a client-submitted 'total' is
+        // never read, so the number saved can never drift from the number that was shown.
+        $pricing = $this->pricing->computeTotal(
+            $voiture, $dateDebut, $dateFin,
+            $reservation->getAccessoires(), $reservation->getRemiseMontant(),
+        );
+        $reservation->setPrixParJour($pricing['prixParJour']);
+        $reservation->setTotal($pricing['total']);
 
         $voiture->setReservationStatus('confirmed');
 
@@ -346,6 +357,48 @@ class ReservationController extends AbstractController
         return $this->json(['message' => 'Réservation créée', 'id' => $reservation->getId()], 201);
     }
 
+    /** Live preview only -- never trusted on save. create()/update() independently compute
+     *  the real total the same way, so this can never be used to make a saved total differ
+     *  from what was actually billed. */
+    #[Route('/preview-total', name: 'preview_total', methods: ['POST'])]
+    public function previewTotal(
+        Request $request,
+        VoitureRepository $voitureRepo,
+        AccessoireRepository $accessoireRepo,
+    ): JsonResponse {
+        $data = json_decode($request->getContent(), true) ?? [];
+
+        $voiture = !empty($data['voitureId']) ? $voitureRepo->find((int) $data['voitureId']) : null;
+        if (!$voiture || empty($data['dateDebut']) || empty($data['dateFin'])) {
+            return $this->json(['total' => null, 'prixParJour' => null]);
+        }
+
+        $dateDebut = new \DateTimeImmutable($data['dateDebut']);
+        $dateFin   = new \DateTimeImmutable($data['dateFin']);
+        if ($dateFin <= $dateDebut) {
+            return $this->json(['total' => null, 'prixParJour' => null]);
+        }
+
+        $accessoires = [];
+        foreach ((array) ($data['accessoireIds'] ?? []) as $accId) {
+            $acc = $accessoireRepo->find((int) $accId);
+            if ($acc) $accessoires[] = $acc;
+        }
+
+        $remiseMontant = isset($data['remiseMontant']) && $data['remiseMontant'] !== '' && $data['remiseMontant'] !== null
+            ? (string) (float) $data['remiseMontant'] : null;
+
+        $pricing = $this->pricing->computeTotal($voiture, $dateDebut, $dateFin, $accessoires, $remiseMontant);
+        $days    = $this->pricing->computeDays($dateDebut, $dateFin);
+
+        return $this->json([
+            'prixParJour'     => (float) $pricing['prixParJour'],
+            'nbJours'         => $days,
+            'accessoireTotal' => array_sum(array_map(fn($a) => (float) $a->getPrix() * $days, $accessoires)),
+            'total'           => (float) $pricing['total'],
+        ]);
+    }
+
     #[Route('/{id}', name: 'update', methods: ['PUT'])]
     public function update(
         Reservation $reservation,
@@ -353,7 +406,8 @@ class ReservationController extends AbstractController
         EntityManagerInterface $em,
         ClientRepository $clientRepo,
         VoitureRepository $voitureRepo,
-        ReservationRepository $reservationRepo
+        ReservationRepository $reservationRepo,
+        AccessoireRepository $accessoireRepo
     ): JsonResponse {
         $this->assertBureauAccess($reservation);
         $data       = json_decode($request->getContent(), true) ?? [];
@@ -399,7 +453,7 @@ class ReservationController extends AbstractController
             }
         }
 
-        if (isset($data['total']))              $reservation->setTotal($data['total']);
+        // total is never read from the client here -- recomputed server-side below.
 
         // ── Confirmation flow ────────────────────────────────────────────────────
         $cancelledClientLines = [];
@@ -462,8 +516,47 @@ class ReservationController extends AbstractController
         if (isset($data['modePaiement']))       $reservation->setModePaiement($data['modePaiement']);
         if (array_key_exists('lieuLivraison', $data)) $reservation->setLieuLivraison($data['lieuLivraison']);
         if (array_key_exists('lieuRetour', $data))    $reservation->setLieuRetour($data['lieuRetour']);
-        if (array_key_exists('prixParJour', $data)) {
-            $reservation->setPrixParJour($data['prixParJour'] !== null ? (string)(float)$data['prixParJour'] : null);
+        // prixParJour is never read from the client either -- it's recomputed below,
+        // same as total.
+
+        // Once a reservation is closed, LocationController::cloture() has already folded
+        // return-time charges into total -- an unconditional recompute here would silently
+        // erase them. So accessoire/remise edits and the pricing recompute all only apply
+        // to a still-open reservation; a closed one keeps whatever total it was closed with.
+        if (!$reservation->isClosed()) {
+            // accessoireIds present -> replace the full set (same array_key_exists semantics
+            // as lieuLivraison/lieuRetour above). This also fixes a pre-existing gap: the
+            // edit form has always sent accessoireIds here, but nothing previously applied
+            // them to the reservation's accessoire collection at all.
+            if (array_key_exists('accessoireIds', $data)) {
+                foreach ($reservation->getAccessoires()->toArray() as $existing) {
+                    $reservation->removeAccessoire($existing);
+                }
+                foreach ((array) ($data['accessoireIds'] ?? []) as $accId) {
+                    $acc = $accessoireRepo->find((int) $accId);
+                    if ($acc) $reservation->addAccessoire($acc);
+                }
+            }
+
+            if (array_key_exists('remiseMontant', $data)) {
+                $reservation->setRemiseMontant($data['remiseMontant'] !== null && $data['remiseMontant'] !== ''
+                    ? number_format((float) $data['remiseMontant'], 2, '.', '') : null);
+            }
+            if (array_key_exists('remiseMotif', $data)) {
+                $reservation->setRemiseMotif($data['remiseMotif']);
+            }
+
+            $voitureForPricing = $reservation->getVoiture();
+            $debutForPricing   = $reservation->getDateDebut();
+            $finForPricing     = $reservation->getDateFin();
+            if ($voitureForPricing && $debutForPricing && $finForPricing) {
+                $pricing = $this->pricing->computeTotal(
+                    $voitureForPricing, $debutForPricing, $finForPricing,
+                    $reservation->getAccessoires(), $reservation->getRemiseMontant(),
+                );
+                $reservation->setPrixParJour($pricing['prixParJour']);
+                $reservation->setTotal($pricing['total']);
+            }
         }
 
         if (array_key_exists('deuxiemeChauffeur', $data)) {
