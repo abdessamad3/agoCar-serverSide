@@ -18,3 +18,8 @@
 ###> local uploads (runtime data, not source) ###
 /public/uploads/
 ###< local uploads ###
+
+###> phpunit/phpunit ###
+/phpunit.xml
+/.phpunit.cache/
+###< phpunit/phpunit ###
