@@ -220,8 +220,16 @@ class VehicleDeliveryController extends AbstractController
         $this->applyData($delivery, $data, $em);
         $delivery->setEditAu(new \DateTimeImmutable());
 
+        // Guard against a blank/0 submission silently erasing the vehicle's real odometer
+        // reading (e.g. a form whose mileage field was never filled in), and against an
+        // accidental lower value overwriting a higher, already-correct one — an odometer
+        // only ever goes up.
         if (isset($data['mileageOut']) && $data['mileageOut'] !== null) {
-            $delivery->getReservation()?->getVoiture()?->setKilometrageActuel((int) $data['mileageOut']);
+            $newMileage = (int) $data['mileageOut'];
+            $voiture = $delivery->getReservation()?->getVoiture();
+            if ($voiture !== null && $newMileage > 0 && $newMileage >= (int) ($voiture->getKilometrageActuel() ?? 0)) {
+                $voiture->setKilometrageActuel($newMileage);
+            }
         }
 
         $em->flush();
