@@ -687,6 +687,14 @@ class LocationController extends AbstractController
             ], $d->getDamages()->toArray()),
             'creeAu' => $d->getCreeAu()?->format('Y-m-d H:i:s'),
             'editAu' => $d->getEditAu()?->format('Y-m-d H:i:s'),
+            // Computed server-side (not derived from the naive, timezone-less timestamps
+            // above) so the frontend's "Annuler" button can't drift out of sync with what
+            // annulerLivraison() will actually accept — see that action for the same check.
+            'canUndo' => (function () use ($d): bool {
+                $deliveredAt = $d->getEditAu() ?? $d->getCreeAu();
+                return $deliveredAt !== null
+                    && (new \DateTimeImmutable())->getTimestamp() - $deliveredAt->getTimestamp() <= 3600;
+            })(),
         ];
     }
 
@@ -730,6 +738,13 @@ class LocationController extends AbstractController
             ], $i->getDamageItems()->toArray()),
             'inspectedAt' => $i->getInspectedAt()->format('Y-m-d H:i:s'),
             'editAu'      => $i->getEditAu()?->format('Y-m-d H:i:s'),
+            // Same reasoning as VehicleDelivery's canUndo — keeps the "Undo Closure" button
+            // in sync with what annulerCloture() will actually accept.
+            'canUndo' => (function () use ($i): bool {
+                $closedAt = $i->getEditAu();
+                return $closedAt !== null
+                    && (new \DateTimeImmutable())->getTimestamp() - $closedAt->getTimestamp() <= 3600;
+            })(),
         ];
     }
 
