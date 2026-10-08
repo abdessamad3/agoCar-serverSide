@@ -215,6 +215,7 @@ class LocationController extends AbstractController
         $delivery->setHasSiegeBebe((bool) ($data['hasSiegeBebe'] ?? false));
         $delivery->setHasTriangle((bool) ($data['hasTriangle'] ?? false));
         $delivery->setSignatureClientDepart($data['signatureClientDepart'] ?? null);
+        $delivery->setSignatureSocieteDepart($data['signatureSocieteDepart'] ?? null);
         $delivery->setSignatureDeuxiemeChauffeur($data['signatureDeuxiemeChauffeur'] ?? null);
         $delivery->setEquipementNotes($data['equipementNotes'] ?? null);
         $delivery->setDeliveryNotes($data['deliveryNotes'] ?? null);
@@ -317,6 +318,8 @@ class LocationController extends AbstractController
         $inspection->setDamageCharge(isset($data['damageCharge']) ? number_format((float) $data['damageCharge'], 2, '.', '') : null);
         $inspection->setEquipmentCharge(isset($data['equipmentCharge']) ? number_format((float) $data['equipmentCharge'], 2, '.', '') : null);
         $inspection->setNotes($data['notes'] ?? null);
+        $inspection->setSignatureClientRetour($data['signatureClientRetour'] ?? null);
+        $inspection->setSignatureSocieteRetour($data['signatureSocieteRetour'] ?? null);
 
         $remiseMontant = (float) ($data['remiseMontant'] ?? 0);
         $inspection->setRemiseMontant($remiseMontant != 0 ? number_format($remiseMontant, 2, '.', '') : null);
