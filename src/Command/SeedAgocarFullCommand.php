@@ -219,8 +219,8 @@ class SeedAgocarFullCommand extends Command
 
         // ── CONTRATS (2) ──────────────────────────────────────────────────────
         $this->db->executeStatement("INSERT INTO contrat (reservation_id, numero, has_caution, caution_montant, signed_at, cree_au) VALUES
-            (1,'CTR-2024-001',1,3000.00,'$d30ago','$now'),
-            (2,'CTR-2024-002',1,4000.00,'$d5ago','$now')");
+            (1,'AGO-2024-000001',1,3000.00,'$d30ago','$now'),
+            (2,'AGO-2024-000002',1,4000.00,'$d5ago','$now')");
         $io->writeln("contrats=1,2");
 
         // ── PAIEMENTS ─────────────────────────────────────────────────────────
@@ -303,7 +303,7 @@ class SeedAgocarFullCommand extends Command
         // ── EMAIL LOG ─────────────────────────────────────────────────────────
         $this->db->executeStatement("INSERT INTO email_log
             (recipient_email, subject, total_alerts, compliance_count, oil_count, credit_count, status, triggered_by, sent_at) VALUES
-            ('rachid.benali@gmail.com','Confirmation réservation CTR-2024-001',1,0,0,0,'sent','admin','$now'),
+            ('rachid.benali@gmail.com','Confirmation réservation AGO-2024-000001',1,0,0,0,'sent','admin','$now'),
             ('john.smith@email.com','Bienvenue chez AGOCAR',1,0,0,0,'sent','admin','$now')");
 
         $this->db->executeStatement("SET FOREIGN_KEY_CHECKS=1");
