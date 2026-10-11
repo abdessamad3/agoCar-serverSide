@@ -11,6 +11,8 @@ use App\Service\ActivityLogService;
 use App\Service\NotificationService;
 use App\Service\ReservationPricingService;
 use Doctrine\ORM\EntityManagerInterface;
+use Dompdf\Dompdf;
+use Dompdf\Options;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -69,6 +71,10 @@ class PublicBookingController extends AbstractController
         $voiture = $em->getRepository(Voiture::class)->find((int) $data['carId']);
         if (!$voiture || $voiture->getDeletedAt() !== null) {
             return $this->json(['error' => 'CAR_NOT_AVAILABLE', 'message' => 'Ce véhicule n\'est plus disponible.'], 404);
+        }
+        $lifecycleState = \App\Enum\VehicleLifecycleState::tryFrom($voiture->getVoitureStatus() ?? '');
+        if ($lifecycleState?->blocksRental()) {
+            return $this->json(['error' => 'CAR_NOT_AVAILABLE', 'message' => 'Ce véhicule n\'est pas disponible à la location actuellement.'], 409);
         }
 
         // Check for date overlap with active (non-cancelled, non-terminated) reservations
@@ -171,6 +177,37 @@ class PublicBookingController extends AbstractController
 
                 $mailer->send($email);
             }
+        } catch (\Throwable) {
+            // Email failure never blocks the booking response
+        }
+
+        // ── Send confirmation email to the client ──────────────────────────
+        // Separate try/catch from the staff email above: one failing must never
+        // block the other, and neither blocks the booking response itself.
+        try {
+            $nights = (int) $dateDebut->setTime(0, 0, 0)->diff($dateFin->setTime(0, 0, 0))->days;
+            $total  = (float) $computed['total'];
+            $ref    = '#' . str_pad((string) $booking->getId(), 6, '0', STR_PAD_LEFT);
+
+            $html  = $this->buildClientEmailHtml($booking, $voiture, $nights, $total, $ref, (float) $computed['prixParJour']);
+            $email = (new Email())
+                ->from($_ENV['MAILER_SENDER'] ?? 'noreply@agocar.ma')
+                ->to($booking->getEmail())
+                ->subject("✅ Votre demande de réservation {$ref} — AGOCAR")
+                ->html($html);
+
+            $pdfHtml = $this->buildClientPdfHtml($booking, $voiture, $nights, $total, $ref, (float) $computed['prixParJour']);
+            $pdfOptions = new Options();
+            $pdfOptions->set('isHtml5ParserEnabled', true);
+            $pdfOptions->set('isRemoteEnabled', false);
+            $pdfOptions->set('defaultFont', 'DejaVu Sans');
+            $dompdf = new Dompdf($pdfOptions);
+            $dompdf->loadHtml($pdfHtml);
+            $dompdf->setPaper('A4', 'portrait');
+            $dompdf->render();
+            $email->attach($dompdf->output(), "recapitulatif-{$ref}.pdf", 'application/pdf');
+
+            $mailer->send($email);
         } catch (\Throwable) {
             // Email failure never blocks the booking response
         }
@@ -417,6 +454,239 @@ class PublicBookingController extends AbstractController
       </table>
     </td></tr>
   </table>
+</body>
+</html>
+HTML;
+    }
+
+    /** Confirmation email sent to the CLIENT — same visual language as the staff
+     *  notification above, different content: no admin CTA, a plain-language
+     *  confirmation, and the business's own contact channels instead. */
+    private function buildClientEmailHtml(
+        BookingRequest $b,
+        Voiture $v,
+        int $nights,
+        ?float $total,
+        string $ref,
+        ?float $effectiveDailyRate = null,
+    ): string {
+        $fmt = fn(?string $val): string => $val ?? '—';
+
+        $car      = $fmt($v->getMarque()) . ' ' . $fmt($v->getModele()) . ($v->getAnnee() ? ' ' . $v->getAnnee() : '');
+        $depart   = $b->getDateDebut()->format('d/m/Y');
+        $retour   = $b->getDateFin()->format('d/m/Y');
+        $nightStr = $nights . ' jour' . ($nights > 1 ? 's' : '');
+        $rateForDisplay = $effectiveDailyRate ?? ($v->getPrixJour() !== null ? (float) $v->getPrixJour() : null);
+        $prixJ    = $rateForDisplay !== null ? number_format($rateForDisplay, 0, ',', ' ') . ' MAD/j' : '—';
+        $totalStr = $total !== null ? number_format($total, 0, ',', ' ') . ' MAD' : '—';
+        $livraison = $b->getLieuLivraison() ? htmlspecialchars($b->getLieuLivraison()) : '—';
+        $firstName = htmlspecialchars(trim(explode(' ', $b->getFullName())[0] ?? $b->getFullName()));
+
+        $row = fn(string $label, string $value): string =>
+            "<tr>
+              <td style=\"padding:10px 16px;border-bottom:1px solid #f1f5f9;font-size:13px;color:#64748b;width:42%;white-space:nowrap\">{$label}</td>
+              <td style=\"padding:10px 16px;border-bottom:1px solid #f1f5f9;font-size:13px;color:#1e293b;font-weight:600\">{$value}</td>
+            </tr>";
+
+        return <<<HTML
+<!DOCTYPE html>
+<html lang="fr">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f8fafc;font-family:system-ui,-apple-system,sans-serif">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;padding:32px 16px">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%">
+
+        <!-- Header -->
+        <tr>
+          <td style="background:#0f172a;border-radius:16px 16px 0 0;padding:28px 32px">
+            <table width="100%" cellpadding="0" cellspacing="0">
+              <tr>
+                <td>
+                  <span style="font-size:22px;font-weight:800;color:#ffffff;letter-spacing:-0.5px">
+                    AGO<span style="color:#fbbf24">CAR</span>
+                  </span>
+                  <p style="margin:4px 0 0;font-size:12px;color:#94a3b8;text-transform:uppercase;letter-spacing:2px">
+                    Confirmation de votre demande
+                  </p>
+                </td>
+                <td align="right">
+                  <span style="display:inline-block;background:#fbbf24;color:#0f172a;font-size:20px;font-weight:800;
+                               padding:8px 18px;border-radius:10px;letter-spacing:1px;font-family:monospace">
+                    {$ref}
+                  </span>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+
+        <!-- Body -->
+        <tr>
+          <td style="background:#ffffff;padding:28px 32px 0">
+            <p style="margin:0 0 4px;font-size:15px;color:#1e293b;font-weight:700">Bonjour {$firstName},</p>
+            <p style="margin:0;font-size:13px;color:#64748b;line-height:1.6">
+              Nous avons bien reçu votre demande de réservation. Notre équipe vous contactera très
+              prochainement pour confirmer la disponibilité et finaliser les détails.
+              Aucun paiement n'est requis pour le moment.
+            </p>
+          </td>
+        </tr>
+
+        <tr>
+          <td style="background:#ffffff;padding:0">
+            <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">
+              <tr>
+                <td colspan="2" style="padding:20px 32px 8px;font-size:11px;font-weight:700;color:#f59e0b;
+                                       text-transform:uppercase;letter-spacing:2px;border-bottom:2px solid #fef3c7">
+                  🚗 Récapitulatif de votre demande
+                </td>
+              </tr>
+              {$row('Véhicule', $car)}
+              {$row('Date de départ', $depart)}
+              {$row('Date de retour', $retour)}
+              {$row('Durée', $nightStr)}
+              {$row('Prix / jour', $prixJ)}
+              {$row('Estimation totale', "<span style=\"color:#f59e0b;font-size:16px\">{$totalStr}</span>")}
+              {$row('Lieu de livraison', $livraison)}
+            </table>
+          </td>
+        </tr>
+
+        <!-- Contact -->
+        <tr>
+          <td style="background:#fafafa;padding:24px 32px;border-top:1px solid #f1f5f9">
+            <p style="margin:0 0 12px;font-size:13px;color:#64748b;text-align:center">
+              Une question en attendant ? Contactez-nous directement :
+            </p>
+            <table width="100%" cellpadding="0" cellspacing="0">
+              <tr>
+                <td align="center">
+                  <a href="https://wa.me/212641311006"
+                     style="display:inline-block;background:#fbbf24;color:#0f172a;font-size:14px;font-weight:700;
+                            padding:12px 28px;border-radius:10px;text-decoration:none;margin:0 6px">
+                    WhatsApp
+                  </a>
+                  <a href="tel:+212641311006"
+                     style="display:inline-block;background:#0f172a;color:#ffffff;font-size:14px;font-weight:700;
+                            padding:12px 28px;border-radius:10px;text-decoration:none;margin:0 6px">
+                    +212 641 311 006
+                  </a>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+
+        <!-- Footer -->
+        <tr>
+          <td style="background:#0f172a;border-radius:0 0 16px 16px;padding:16px 32px;text-align:center">
+            <p style="margin:0;font-size:11px;color:#475569">
+              © {$b->getCreeAu()->format('Y')} AGOCAR · Cet email est généré automatiquement
+            </p>
+          </td>
+        </tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>
+HTML;
+    }
+
+    /** One-page PDF attached to the client confirmation email — a summary of the
+     *  request, not a formal invoice (nothing has been charged or confirmed yet;
+     *  the total shown is an estimate, same one already computed above). Kept to
+     *  simple table markup — Dompdf doesn't support flex/grid. */
+    private function buildClientPdfHtml(
+        BookingRequest $b,
+        Voiture $v,
+        int $nights,
+        ?float $total,
+        string $ref,
+        ?float $effectiveDailyRate = null,
+    ): string {
+        $fmt = fn(?string $val): string => $val ?? '—';
+
+        $car      = $fmt($v->getMarque()) . ' ' . $fmt($v->getModele()) . ($v->getAnnee() ? ' ' . $v->getAnnee() : '');
+        $depart   = $b->getDateDebut()->format('d/m/Y');
+        $retour   = $b->getDateFin()->format('d/m/Y');
+        $nightStr = $nights . ' jour' . ($nights > 1 ? 's' : '');
+        $rateForDisplay = $effectiveDailyRate ?? ($v->getPrixJour() !== null ? (float) $v->getPrixJour() : null);
+        $prixJ    = $rateForDisplay !== null ? number_format($rateForDisplay, 0, ',', ' ') . ' MAD/j' : '—';
+        $totalStr = $total !== null ? number_format($total, 0, ',', ' ') . ' MAD' : '—';
+        $livraison = $b->getLieuLivraison() ? htmlspecialchars($b->getLieuLivraison()) : '—';
+        $bureau   = $v->getBureau()?->getNom() ?? '—';
+        $emis     = $b->getCreeAu()->format('d/m/Y à H:i');
+
+        $row = fn(string $label, string $value): string =>
+            "<tr>
+              <td style=\"padding:9px 0;border-bottom:1px solid #e2e8f0;color:#64748b;width:45%\">{$label}</td>
+              <td style=\"padding:9px 0;border-bottom:1px solid #e2e8f0;color:#1e293b;font-weight:bold\">{$value}</td>
+            </tr>";
+
+        return <<<HTML
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font-family: 'DejaVu Sans', sans-serif; color: #1e293b; margin: 0; padding: 0; }
+    .header { background: #0f172a; padding: 24px 36px; }
+    .brand { font-size: 20px; font-weight: bold; color: #ffffff; }
+    .brand .accent { color: #fbbf24; }
+    .subtitle { font-size: 11px; color: #94a3b8; text-transform: uppercase; letter-spacing: 1.5px; margin-top: 4px; }
+    .ref { font-size: 16px; font-weight: bold; color: #fbbf24; font-family: monospace; }
+    .body { padding: 28px 36px; }
+    .section-title { font-size: 11px; font-weight: bold; color: #f59e0b; text-transform: uppercase; letter-spacing: 1.5px;
+                      border-bottom: 2px solid #fef3c7; padding-bottom: 6px; margin: 20px 0 6px; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .note { background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px; padding: 12px 16px; font-size: 11px;
+            color: #92400e; margin-top: 18px; }
+    .footer { padding: 16px 36px; font-size: 10px; color: #94a3b8; text-align: center; margin-top: 24px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <table width="100%"><tr>
+      <td>
+        <div class="brand">AGO<span class="accent">CAR</span></div>
+        <div class="subtitle">Récapitulatif de demande de réservation</div>
+      </td>
+      <td align="right"><span class="ref">{$ref}</span></td>
+    </tr></table>
+  </div>
+
+  <div class="body">
+    <p style="font-size:11px;color:#94a3b8;margin:0 0 20px">Émis le {$emis}</p>
+
+    <div class="section-title">Véhicule &amp; période</div>
+    <table>
+      {$row('Véhicule', $car)}
+      {$row('Bureau', $bureau)}
+      {$row('Date de départ', $depart)}
+      {$row('Date de retour', $retour)}
+      {$row('Durée', $nightStr)}
+      {$row('Prix / jour', $prixJ)}
+      {$row('Estimation totale', $totalStr)}
+      {$row('Lieu de livraison', $livraison)}
+    </table>
+
+    <div class="section-title">Client</div>
+    <table>
+      {$row('Nom complet', htmlspecialchars($b->getFullName()))}
+      {$row('Téléphone', htmlspecialchars($b->getPhone()))}
+      {$row('Email', htmlspecialchars($b->getEmail()))}
+    </table>
+
+    <div class="note">
+      Ce document est un récapitulatif de votre demande, pas une facture — aucun montant n'a été
+      débité et l'estimation ci-dessus peut être ajustée lors de la confirmation par notre équipe.
+    </div>
+  </div>
+
+  <div class="footer">© {$b->getCreeAu()->format('Y')} AGOCAR · contact@agorent.com · +212 641 311 006</div>
 </body>
 </html>
 HTML;
