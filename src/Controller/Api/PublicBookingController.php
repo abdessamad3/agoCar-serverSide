@@ -7,6 +7,7 @@ use App\Entity\Client;
 use App\Entity\Reservation;
 use App\Entity\Utilisateur;
 use App\Entity\Voiture;
+use App\Repository\ReservationRepository;
 use App\Service\ActivityLogService;
 use App\Service\NotificationService;
 use App\Service\ReservationPricingService;
@@ -38,6 +39,7 @@ class PublicBookingController extends AbstractController
         MailerInterface $mailer,
         NotificationService $notifService,
         ReservationPricingService $pricing,
+        ReservationRepository $reservationRepo,
     ): JsonResponse {
         $data = json_decode($request->getContent(), true) ?? [];
 
@@ -77,21 +79,11 @@ class PublicBookingController extends AbstractController
             return $this->json(['error' => 'CAR_NOT_AVAILABLE', 'message' => 'Ce véhicule n\'est pas disponible à la location actuellement.'], 409);
         }
 
-        // Check for date overlap with active (non-cancelled, non-terminated) reservations
-        $overlap = $em->createQuery(
-            'SELECT COUNT(r.id) FROM App\Entity\Reservation r
-             WHERE r.voiture = :voiture
-               AND r.reservationStatus NOT IN (:closed)
-               AND r.dateDebut < :fin
-               AND r.dateFin > :debut'
-        )
-            ->setParameter('voiture', $voiture)
-            ->setParameter('closed', ['terminee', 'termine_avant_terme', 'annulee'])
-            ->setParameter('debut', $dateDebut)
-            ->setParameter('fin', $dateFin)
-            ->getSingleScalarResult();
-
-        if ($overlap > 0) {
+        // Only a confirmed/active reservation blocks a new client request — a pending
+        // one (e.g. another client's unconfirmed request for the same dates) does not.
+        // Staff can hold multiple pending requests on the same slot; confirming one
+        // auto-cancels the others (see ReservationController::findConflictingPending).
+        if ($reservationRepo->hasConfirmedOverlap($voiture->getId(), $dateDebut, $dateFin, 0)) {
             return $this->json(['error' => 'CAR_NOT_AVAILABLE', 'message' => 'Ce véhicule n\'est pas disponible sur cette période.'], 409);
         }
 

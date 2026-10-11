@@ -69,7 +69,11 @@ class VoitureRepository extends ServiceEntityRepository
     }
 
     /**
-     * Return IDs of voitures that have an overlapping reservation in the given period
+     * Return IDs of voitures that have a confirmed/active overlapping reservation in
+     * the given period. A merely 'pending' reservation does NOT make a car
+     * unavailable here — matches ReservationRepository::hasConfirmedOverlap() and
+     * PublicVoitureController::blockedPeriods(). Boundary is strict (back-to-back
+     * dates don't overlap) to match every other overlap check in the codebase.
      */
     public function findBookedVoitureIdsForPeriod(\DateTimeInterface $dateDebut, \DateTimeInterface $dateFin): array
     {
@@ -77,12 +81,12 @@ class VoitureRepository extends ServiceEntityRepository
         $qb->select('rv.id as voiture_id')
            ->from(\App\Entity\Reservation::class, 'r')
            ->join('r.voiture', 'rv')
-           ->where('r.dateDebut <= :dateFin')
-           ->andWhere('r.dateFin >= :dateDebut')
-           ->andWhere('r.reservationStatus != :cancelled')
+           ->where('r.dateDebut < :dateFin')
+           ->andWhere('r.dateFin > :dateDebut')
+           ->andWhere('r.reservationStatus IN (:active)')
            ->setParameter('dateDebut', $dateDebut)
            ->setParameter('dateFin', $dateFin)
-           ->setParameter('cancelled', 'cancelled');
+           ->setParameter('active', ['confirmed', 'confirmee', 'en_cours']);
 
         return array_column($qb->getQuery()->getScalarResult(), 'voiture_id');
     }
