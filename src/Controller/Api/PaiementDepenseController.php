@@ -89,10 +89,20 @@ class PaiementDepenseController extends AbstractController
         $alreadyPaid = (float) ($depense->getMontantPaye() ?? 0);
         $reste       = $total - $alreadyPaid;
 
-        if ($montant <= 0) {
-            return $this->json(['error' => 'Le montant doit être supérieur à 0'], 400);
+        if ($montant === 0.0) {
+            return $this->json(['error' => 'Le montant ne peut pas être zéro'], 400);
         }
-        if ($montant > $reste + 0.001) {
+        // Negative montant = refund (supplier/garage returned money already paid),
+        // recorded as its own row rather than editing/deleting the original payment --
+        // mirrors PaiementController's reservation-side refund handling. Bounded so you
+        // can't refund more than was actually paid on this expense.
+        if ($montant < 0) {
+            if (abs($montant) > $alreadyPaid + 0.001) {
+                return $this->json([
+                    'error' => sprintf('Le remboursement (%.2f) dépasse le montant déjà payé (%.2f)', abs($montant), $alreadyPaid)
+                ], 422);
+            }
+        } elseif ($montant > $reste + 0.001) {
             return $this->json([
                 'error' => sprintf('Le montant (%.2f) dépasse le restant dû (%.2f)', $montant, $reste)
             ], 422);
@@ -115,7 +125,7 @@ class PaiementDepenseController extends AbstractController
         $paiement->setMontant((string) $montant);
         $paiement->setDatePaiement($datePaiement);
         $paiement->setNote($request->request->get('note'));
-        $paiement->setPaymentType(PaymentTypeEnum::INSTALLMENT);
+        $paiement->setPaymentType($montant < 0 ? PaymentTypeEnum::ADJUSTMENT : PaymentTypeEnum::INSTALLMENT);
 
         $paymentMethodRaw = $request->request->get('paymentMethod');
         if ($paymentMethodRaw) {
