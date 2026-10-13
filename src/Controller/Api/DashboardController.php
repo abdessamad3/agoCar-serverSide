@@ -11,6 +11,7 @@ use App\Repository\ClientRepository;
 use App\Repository\DepenseRepository;
 use App\Service\DashboardAggregatorService;
 use App\Service\OilChangeService;
+use App\Service\PaymentSumHelper;
 use App\Trait\BureauAwareTrait;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -306,23 +307,29 @@ class DashboardController extends AbstractController
         $cancelledStatuses = ['annulee', 'annule', 'cancelled'];
 
         $qb = $this->reservationRepo->createQueryBuilder('r')
-            ->select('r.reservationStatus', 'r.total', 'r.montantPaye')
+            ->select('r.id', 'r.reservationStatus', 'r.total', 'r.montantPaye')
             ->where('r.deletedAt IS NULL');
         if ($bureauId) {
             $qb->join('r.voiture', 'v')->andWhere('v.bureau = :bid')->setParameter('bid', $bureauId);
         }
         $rows = $qb->getQuery()->getScalarResult();
 
+        // This is a scalar query, not hydrated Reservation entities, so it can't use
+        // Reservation::getBalance() -- see PaymentSumHelper::sumReservationRefundsByReservation
+        // docblock for why a refund must be added back before clamping "owed" at 0.
+        $refundedByReservation = PaymentSumHelper::sumReservationRefundsByReservation($this->em, $bureauId);
+
         $revenue       = 0.0;
         $pendingAmount = 0.0;
         foreach ($rows as $row) {
-            $status = strtolower($row['reservationStatus'] ?? '');
-            $total  = (float) ($row['total'] ?? 0);
-            $paid   = (float) ($row['montantPaye'] ?? 0);
+            $status   = strtolower($row['reservationStatus'] ?? '');
+            $total    = (float) ($row['total'] ?? 0);
+            $paid     = (float) ($row['montantPaye'] ?? 0);
+            $refunded = $refundedByReservation[(int) $row['id']] ?? 0.0;
 
             if (!in_array($status, $cancelledStatuses, true)) {
                 $revenue       += $paid;
-                $pendingAmount += max(0.0, $total - $paid);
+                $pendingAmount += max(0.0, $total - $paid - $refunded);
             }
         }
 

@@ -279,10 +279,31 @@ class Reservation
     // ── Computed financial values — derived from total/montantPaye, never stored, so they
     //    can never drift out of sync with the numbers they're computed from. ──────────────
 
+    /**
+     * Total refunded to the client so far (sum of negative Paiement rows). montantPaye
+     * is already net of refunds, so without this, a refund on an already-settled
+     * reservation makes getBalance()/getMontantRestant() show a brand new debt that
+     * isn't real -- the client doesn't owe anything just because money was given back.
+     * Reads the already-loaded `paiements` collection rather than a fresh query, so this
+     * is cheap for a single already-fetched reservation but triggers one lazy-load query
+     * per call on a list of reservations fetched without an explicit paiements join.
+     */
+    public function getMontantRembourse(): float
+    {
+        $sum = 0.0;
+        foreach ($this->paiements as $p) {
+            if ($p->getDeletedAt() !== null) continue;
+            $montant = (float) $p->getMontant();
+            if ($montant < 0) $sum += abs($montant);
+        }
+        return $sum;
+    }
+
     /** Signed balance: negative = client owes money, positive = company owes a refund, 0 = settled. */
     public function getBalance(): float
     {
-        return (float) ($this->montantPaye ?? 0) - (float) ($this->total ?? 0);
+        $grossPaid = (float) ($this->montantPaye ?? 0) + $this->getMontantRembourse();
+        return $grossPaid - (float) ($this->total ?? 0);
     }
 
     /** Outstanding amount still owed by the client — never negative (use getBalance() for refunds). */

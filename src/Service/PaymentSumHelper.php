@@ -3,6 +3,7 @@
 namespace App\Service;
 
 use App\Entity\PaiementDepense;
+use App\Entity\Paiement;
 use Doctrine\ORM\EntityManagerInterface;
 
 /**
@@ -72,6 +73,41 @@ final class PaymentSumHelper
         $result = [];
         foreach ($qb->getQuery()->getResult() as $row) {
             $result[(int) $row['voitureId']] = abs((float) ($row['refunded'] ?? 0));
+        }
+        return $result;
+    }
+
+    /**
+     * Sums refund rows (negative Paiement amounts) grouped by reservation. Mirrors
+     * sumExpenseRefundsByVoiture() for the reservation/income side: Reservation.total
+     * never changes when a client is refunded, only montantPaye does, so any
+     * "pending/owed" figure built from (total - montantPaye) alone falsely shows a new
+     * debt after a refund on an already-settled reservation. Callers that only have
+     * scalar query results (not hydrated Reservation entities) must add this back
+     * before clamping an "owed" figure at 0 -- a hydrated entity should instead use
+     * Reservation::getBalance()/getMontantRestant(), which already do this.
+     *
+     * @return array<int, float> reservationId => refunded amount (positive)
+     */
+    public static function sumReservationRefundsByReservation(
+        EntityManagerInterface $em,
+        ?int $bureauId = null,
+    ): array {
+        $qb = $em->createQueryBuilder()
+            ->select('r.id as reservationId, SUM(p.montant) as refunded')
+            ->from(Paiement::class, 'p')
+            ->join('p.reservation', 'r')
+            ->where('p.deletedAt IS NULL')
+            ->andWhere('p.montant < 0')
+            ->andWhere('r.deletedAt IS NULL')
+            ->groupBy('r.id');
+        if ($bureauId) {
+            $qb->join('r.voiture', 'v')->andWhere('v.bureau = :b')->setParameter('b', $bureauId);
+        }
+
+        $result = [];
+        foreach ($qb->getQuery()->getResult() as $row) {
+            $result[(int) $row['reservationId']] = abs((float) ($row['refunded'] ?? 0));
         }
         return $result;
     }

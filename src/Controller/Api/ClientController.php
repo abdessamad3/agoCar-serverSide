@@ -4,6 +4,7 @@ namespace App\Controller\Api;
 
 use App\Entity\Client;
 use App\Entity\ClientDocument;
+use App\Entity\Paiement;
 use App\Entity\Reservation;
 use App\Repository\ClientRepository;
 use App\Repository\ClientDocumentRepository;
@@ -129,12 +130,24 @@ class ClientController extends AbstractController
             $qb->andWhere('c.nationalite = :nat')->setParameter('nat', $nationalite);
         }
         if ($hasDebt) {
+            // rd.total never changes when a client is refunded, only montantPaye does, so
+            // comparing those two alone would flag a client as having debt again right
+            // after being refunded on an already-settled reservation -- add the refund
+            // back first (mirrors Reservation::getBalance()).
+            $refundSub = $em->createQueryBuilder()
+                ->select('COALESCE(SUM(ABS(pd.montant)), 0)')
+                ->from(Paiement::class, 'pd')
+                ->where('pd.reservation = rd')
+                ->andWhere('pd.deletedAt IS NULL')
+                ->andWhere('pd.montant < 0')
+                ->getDQL();
+
             $sub = $em->createQueryBuilder()
                 ->select('1')->from(Reservation::class, 'rd')
                 ->where('rd.client = c')
                 ->andWhere('rd.deletedAt IS NULL')
                 ->andWhere('rd.reservationStatus NOT IN (:cancelStatuses)')
-                ->andWhere('rd.total > COALESCE(rd.montantPaye, 0)')
+                ->andWhere("rd.total > (COALESCE(rd.montantPaye, 0) + ($refundSub))")
                 ->getDQL();
             $qb->andWhere($qb->expr()->exists($sub))
                ->setParameter('cancelStatuses', ['cancelled', 'annulee', 'annule']);
