@@ -2,6 +2,7 @@
 
 namespace App\Controller\Api;
 
+use App\Entity\PaiementDepense;
 use App\Entity\Reservation;
 use App\Entity\VehicleCreditInstallment;
 use App\Repository\VoitureRepository;
@@ -334,6 +335,26 @@ class DashboardController extends AbstractController
             $expQb->andWhere('d.bureau = :bid OR v.bureau = :bid')->setParameter('bid', $bureauId);
         }
         $expenses = (float) ($expQb->getQuery()->getSingleScalarResult() ?? 0);
+
+        // Refunds reduce the TRUE cost of an expense (money actually came back), but
+        // Depense.montant (the committed/invoiced total summed above) never changes when
+        // a refund is recorded -- only montantPaye does. Subtract them here too, matching
+        // $expQb's exact scope (including voiture-less office expenses) so this figure
+        // doesn't silently ignore every refund.
+        $refundQb = $this->em->createQueryBuilder()
+            ->select('SUM(pd.montant) as total')
+            ->from(PaiementDepense::class, 'pd')
+            ->join('pd.depense', 'd')
+            ->leftJoin('d.voiture', 'v')
+            ->where('pd.deletedAt IS NULL')
+            ->andWhere('pd.montant < 0')
+            ->andWhere('d.deletedAt IS NULL')
+            ->andWhere('v.id IS NULL OR v.deletedAt IS NULL');
+        if ($bureauId) {
+            $refundQb->andWhere('d.bureau = :bid OR v.bureau = :bid')->setParameter('bid', $bureauId);
+        }
+        $refunded = abs((float) ($refundQb->getQuery()->getSingleScalarResult() ?? 0));
+        $expenses -= $refunded;
 
         // Credit installments actually paid — mirrors ProfitabilityService's credit handling.
         $creditQb = $this->em->createQueryBuilder()

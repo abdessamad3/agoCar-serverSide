@@ -122,9 +122,18 @@ class ProfitabilityService
         if ($bureauId) $qbUnpaid->andWhere('v.bureau = :b')->setParameter('b', $bureauId);
         if ($carId)    $qbUnpaid->andWhere('v.id = :cid')->setParameter('cid', $carId);
 
+        // Refunds (see PaymentSumHelper::sumExpenseRefundsByVoiture docblock): montantPaye
+        // already nets them out, so (montant - montantPaye) alone makes a refund on an
+        // already-fully-paid expense look like a brand new unpaid debt. Adding the refund
+        // back cancels that out -- a refund doesn't reopen the original invoice as unpaid,
+        // it's a separate, later correction.
+        $refundedByVoiture = PaymentSumHelper::sumExpenseRefundsByVoiture($this->em, $bureauId, $carId, null);
+
         $unpaidByVoiture = [];
         foreach ($qbUnpaid->getQuery()->getResult() as $row) {
-            $unpaidByVoiture[(int) $row['voitureId']] = max(0.0, (float) ($row['unpaid'] ?? 0));
+            $vid = (int) $row['voitureId'];
+            $raw = (float) ($row['unpaid'] ?? 0) - ($refundedByVoiture[$vid] ?? 0.0);
+            $unpaidByVoiture[$vid] = max(0.0, $raw);
         }
 
         // Credit installments accrued by due date (mirrors how operational costs are committed).
@@ -149,6 +158,12 @@ class ProfitabilityService
             $creditByVoiture[(int) $row['voitureId']] = (float) ($row['creditPaid'] ?? 0);
         }
 
+        // Year-scoped (unlike $refundedByVoiture above, which is deliberately all-time for
+        // the unpaid-balance check) so a refund only offsets the same year's committed cost
+        // it was recorded against, consistent with how $operationalTotalByVoiture/$credit
+        // are themselves year-filtered.
+        $refundedForNetByVoiture = PaymentSumHelper::sumExpenseRefundsByVoiture($this->em, $bureauId, $carId, $year);
+
         $rows = [];
         foreach ($cars as $car) {
             $vid    = $car->getId();
@@ -158,6 +173,7 @@ class ProfitabilityService
             $credit = $creditByVoiture[$vid]  ?? 0.0;
             $unpaid = $unpaidByVoiture[$vid]  ?? 0.0;
             $operationalTotal = $operationalTotalByVoiture[$vid] ?? 0.0;
+            $refunded = $refundedForNetByVoiture[$vid] ?? 0.0;
 
             $operationalCost = $costs['repair'] + $costs['insurance'] + $costs['vignette']
                              + $costs['vidange'] + $costs['adblue'] + $costs['suivi'] + $costs['other'];
@@ -167,7 +183,9 @@ class ProfitabilityService
 
             // Net profit uses the full committed expense amount (paid + unpaid), not just
             // what's been paid — see comment above where $operationalTotalByVoiture is built.
-            $net = $rev - ($operationalTotal + $credit);
+            // A refund genuinely lowers that committed cost (money actually came back), so
+            // it's subtracted here even though it never touches `montant` itself.
+            $net = $rev - ($operationalTotal + $credit - $refunded);
             $rows[] = [
                 'id'              => $vid,
                 'label'           => trim(($car->getMarque() ?? '') . ' ' . ($car->getModele() ?? '')),
