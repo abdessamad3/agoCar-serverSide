@@ -44,13 +44,24 @@ class PublicBookingController extends AbstractController
         $data = json_decode($request->getContent(), true) ?? [];
 
         $errors = [];
-        foreach (['carId', 'dateDebut', 'dateFin', 'fullName', 'phone', 'email'] as $field) {
+        foreach (['carId', 'dateDebut', 'dateFin', 'fullName', 'phone', 'email', 'permisDelivreLe'] as $field) {
             if (empty($data[$field])) {
                 $errors[$field] = 'Ce champ est requis.';
             }
         }
         if (!empty($data['email']) && !filter_var($data['email'], FILTER_VALIDATE_EMAIL)) {
             $errors['email'] = 'Email invalide.';
+        }
+        $permisDelivreLe = null;
+        if (!empty($data['permisDelivreLe'])) {
+            try {
+                $permisDelivreLe = new \DateTimeImmutable($data['permisDelivreLe']);
+                if ($permisDelivreLe > new \DateTimeImmutable('today')) {
+                    $errors['permisDelivreLe'] = 'La date de délivrance du permis ne peut pas être dans le futur.';
+                }
+            } catch (\Exception) {
+                $errors['permisDelivreLe'] = 'Date invalide.';
+            }
         }
         if (!empty($errors)) {
             return $this->json(['error' => 'VALIDATION_ERROR', 'fields' => $errors], 422);
@@ -108,6 +119,7 @@ class PublicBookingController extends AbstractController
         $client->setPrenom($prenom);
         $client->setEmail($booking->getEmail());
         $client->setTelephone($booking->getPhone());
+        $client->setPermisDelivreLe($permisDelivreLe);
         $client->setAdresseMaroc('');
         $client->setBureau($voiture->getBureau());
         $client->setCreeAu(new \DateTimeImmutable());
@@ -157,7 +169,7 @@ class PublicBookingController extends AbstractController
                 $total = (float) $computed['total'];
                 $ref   = '#' . str_pad((string) $booking->getId(), 6, '0', STR_PAD_LEFT);
 
-                $html  = $this->buildEmailHtml($booking, $voiture, $nights, $total, $ref, $reservation->getId(), (float) $computed['prixParJour']);
+                $html  = $this->buildEmailHtml($booking, $voiture, $nights, $total, $ref, $reservation->getId(), (float) $computed['prixParJour'], $permisDelivreLe);
                 $email = (new Email())
                     ->from($_ENV['MAILER_SENDER'] ?? 'noreply@agocar.ma')
                     ->subject("🚗 Nouvelle réservation {$ref} — {$voiture->getMarque()} {$voiture->getModele()}")
@@ -306,8 +318,25 @@ class PublicBookingController extends AbstractController
         string $ref,
         int $reservationId,
         ?float $effectiveDailyRate = null,
+        ?\DateTimeImmutable $permisDelivreLe = null,
     ): string {
         $fmt = fn(?string $val): string => $val ?? '—';
+        $permisAnciennete = '';
+        if ($permisDelivreLe) {
+            $diff = $permisDelivreLe->diff(new \DateTimeImmutable('today'));
+            if ($diff->y > 0) {
+                $permisAnciennete = $diff->y . ' an' . ($diff->y > 1 ? 's' : '')
+                    . ($diff->m > 0 ? ' et ' . $diff->m . ' mois' : '');
+            } elseif ($diff->m > 0) {
+                $permisAnciennete = $diff->m . ' mois';
+            } else {
+                $permisAnciennete = $diff->d . ' jour' . ($diff->d > 1 ? 's' : '');
+            }
+        }
+        $permisStr = $permisDelivreLe
+            ? $permisDelivreLe->format('d/m/Y')
+                . ($permisAnciennete ? " <span style=\"color:#94a3b8;font-weight:400\">({$permisAnciennete})</span>" : '')
+            : '—';
 
         $car      = $fmt($v->getMarque()) . ' ' . $fmt($v->getModele()) . ($v->getAnnee() ? ' ' . $v->getAnnee() : '');
         $depart   = $b->getDateDebut()->format('d/m/Y');
@@ -394,6 +423,7 @@ class PublicBookingController extends AbstractController
               {$row('Nom complet', htmlspecialchars($b->getFullName()))}
               {$row('Téléphone', htmlspecialchars($b->getPhone()))}
               {$row('Email', htmlspecialchars($b->getEmail()))}
+              {$row('Permis délivré le', $permisStr)}
             </table>
 
             <!-- Message -->
