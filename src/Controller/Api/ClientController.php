@@ -147,7 +147,7 @@ class ClientController extends AbstractController
                 ->where('rd.client = c')
                 ->andWhere('rd.deletedAt IS NULL')
                 ->andWhere('rd.reservationStatus NOT IN (:cancelStatuses)')
-                ->andWhere("rd.total > (COALESCE(rd.montantPaye, 0) + ($refundSub))")
+                ->andWhere("(rd.total - COALESCE(rd.montantPaye, 0)) > ($refundSub)")
                 ->getDQL();
             $qb->andWhere($qb->expr()->exists($sub))
                ->setParameter('cancelStatuses', ['cancelled', 'annulee', 'annule']);
