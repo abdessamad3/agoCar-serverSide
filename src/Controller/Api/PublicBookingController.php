@@ -44,13 +44,17 @@ class PublicBookingController extends AbstractController
         $data = json_decode($request->getContent(), true) ?? [];
 
         $errors = [];
-        foreach (['carId', 'dateDebut', 'dateFin', 'fullName', 'phone', 'email', 'permisDelivreLe'] as $field) {
+        foreach (['carId', 'dateDebut', 'dateFin', 'fullName', 'phone', 'email', 'permisDelivreLe', 'idNumber'] as $field) {
             if (empty($data[$field])) {
                 $errors[$field] = 'Ce champ est requis.';
             }
         }
         if (!empty($data['email']) && !filter_var($data['email'], FILTER_VALIDATE_EMAIL)) {
             $errors['email'] = 'Email invalide.';
+        }
+        $idType = $data['idType'] ?? null;
+        if (!empty($data['idNumber']) && !in_array($idType, ['cin', 'passeport'], true)) {
+            $errors['idType'] = 'Type de pièce d\'identité invalide.';
         }
         $permisDelivreLe = null;
         if (!empty($data['permisDelivreLe'])) {
@@ -120,6 +124,12 @@ class PublicBookingController extends AbstractController
         $client->setEmail($booking->getEmail());
         $client->setTelephone($booking->getPhone());
         $client->setPermisDelivreLe($permisDelivreLe);
+        $idNumber = trim($data['idNumber']);
+        if ($idType === 'passeport') {
+            $client->setPasseport($idNumber);
+        } else {
+            $client->setCin($idNumber);
+        }
         $client->setAdresseMaroc('');
         $client->setBureau($voiture->getBureau());
         $client->setCreeAu(new \DateTimeImmutable());
