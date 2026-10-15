@@ -183,7 +183,7 @@ class PublicBookingController extends AbstractController
             'email'     => $booking->getEmail(),
         ], $voiture->getBureau());
 
-        // ── Send notification email to bureau staff ────────────────────────
+        // ── Send notification email to bureau staff (each in their own language) ──
         try {
             $recipients = $this->collectRecipients($em, $voiture);
             if (!empty($recipients)) {
@@ -196,17 +196,27 @@ class PublicBookingController extends AbstractController
                 $total = (float) $computed['total'];
                 $ref   = '#' . str_pad((string) $booking->getId(), 6, '0', STR_PAD_LEFT);
 
-                $html  = $this->buildEmailHtml($booking, $voiture, $nights, $total, $ref, $reservation->getId(), (float) $computed['prixParJour'], $permisDelivreLe, $existingMatch);
-                $email = (new Email())
-                    ->from($_ENV['MAILER_SENDER'] ?? 'noreply@agocar.ma')
-                    ->subject("🚗 Nouvelle réservation {$ref} — {$voiture->getMarque()} {$voiture->getModele()}")
-                    ->html($html);
-
-                foreach ($recipients as $to) {
-                    $email->addTo($to);
+                // Group recipients by their own langue -- one rendered email per group,
+                // not one shared email, since HTML/subject differ per language.
+                $byLang = [];
+                foreach ($recipients as $email => $langue) {
+                    $byLang[$langue][] = $email;
                 }
 
-                $mailer->send($email);
+                foreach ($byLang as $langue => $emails) {
+                    $s = $this->emailStrings($langue);
+                    $html  = $this->buildEmailHtml($booking, $voiture, $nights, $total, $ref, $reservation->getId(), (float) $computed['prixParJour'], $permisDelivreLe, $existingMatch, $langue);
+                    $email = (new Email())
+                        ->from($_ENV['MAILER_SENDER'] ?? 'noreply@agocar.ma')
+                        ->subject("🚗 {$s['subjectPrefix']} {$ref} — {$voiture->getMarque()} {$voiture->getModele()}")
+                        ->html($html);
+
+                    foreach ($emails as $to) {
+                        $email->addTo($to);
+                    }
+
+                    $mailer->send($email);
+                }
             }
         } catch (\Throwable) {
             // Email failure never blocks the booking response
@@ -313,14 +323,16 @@ class PublicBookingController extends AbstractController
     }
 
     /** @return string[] deduplicated email addresses for the voiture's bureau */
+    /** @return array<string,string> email => langue (en|fr|ar), each recipient's own preference */
     private function collectRecipients(EntityManagerInterface $em, Voiture $voiture): array
     {
         $bureau = $voiture->getBureau();
         $seen   = [];
 
         // Bureau manager
-        if ($bureau?->getManager()?->getEmail() && $bureau->getManager()->isActif()) {
-            $seen[$bureau->getManager()->getEmail()] = true;
+        $manager = $bureau?->getManager();
+        if ($manager?->getEmail() && $manager->isActif()) {
+            $seen[$manager->getEmail()] = $manager->getLangue();
         }
 
         // All active staff attached to this bureau
@@ -329,12 +341,113 @@ class PublicBookingController extends AbstractController
             $staff = $em->getRepository(Utilisateur::class)->findBy(['bureau' => $bureau, 'actif' => true]);
             foreach ($staff as $u) {
                 if ($u->getEmail()) {
-                    $seen[$u->getEmail()] = true;
+                    $seen[$u->getEmail()] = $u->getLangue();
                 }
             }
         }
 
-        return array_keys($seen);
+        return $seen;
+    }
+
+    /** Strings for the staff notification email, one set per recipient's own langue
+     *  (Utilisateur::$langue) -- each recipient gets the email rendered in their own
+     *  preference, not one shared language for everyone. */
+    private function emailStrings(string $langue): array
+    {
+        $strings = [
+            'fr' => [
+                'headerSubtitle'   => 'Nouvelle demande de réservation',
+                'sectionVehicle'   => 'Véhicule &amp; Période',
+                'labelVehicle'     => 'Véhicule',
+                'labelBureau'      => 'Bureau',
+                'labelDateStart'   => 'Date de départ',
+                'labelDateEnd'     => 'Date de retour',
+                'labelDuration'    => 'Durée',
+                'labelPricePerDay' => 'Prix / jour',
+                'labelTotal'       => 'Estimation totale',
+                'labelDelivery'    => 'Lieu de livraison',
+                'sectionClient'    => 'Informations Client',
+                'labelFullName'    => 'Nom complet',
+                'labelPhone'       => 'Téléphone',
+                'labelEmail'       => 'Email',
+                'labelLicenseIssued' => 'Permis délivré le',
+                'sectionMessage'   => 'Message du client',
+                'noMessage'        => 'Aucun message',
+                'ctaText'          => "Connectez-vous à l'application pour traiter cette demande",
+                'ctaButton'        => "Ouvrir l'application →",
+                'footer'           => 'Cet email est généré automatiquement',
+                'subjectPrefix'    => 'Nouvelle réservation',
+                'dupWarningTitle'  => 'Client possiblement déjà existant',
+                'dupWarningBody'   => 'ce numéro CIN/passeport correspond à',
+                'dupWarningClient' => 'client',
+                'dupWarningCheck'  => "Vérifiez avant de confirmer s'il s'agit de la même personne.",
+                'nightsSing' => 'jour', 'nightsPlur' => 'jours',
+                'yearsSing'  => 'an',   'yearsPlur'  => 'ans', 'and' => 'et',
+                'months'     => 'mois', 'daysSing'   => 'jour', 'daysPlur' => 'jours',
+            ],
+            'en' => [
+                'headerSubtitle'   => 'New booking request',
+                'sectionVehicle'   => 'Vehicle &amp; Period',
+                'labelVehicle'     => 'Vehicle',
+                'labelBureau'      => 'Branch',
+                'labelDateStart'   => 'Start date',
+                'labelDateEnd'     => 'Return date',
+                'labelDuration'    => 'Duration',
+                'labelPricePerDay' => 'Price / day',
+                'labelTotal'       => 'Estimated total',
+                'labelDelivery'    => 'Delivery location',
+                'sectionClient'    => 'Client Information',
+                'labelFullName'    => 'Full name',
+                'labelPhone'       => 'Phone',
+                'labelEmail'       => 'Email',
+                'labelLicenseIssued' => 'License issued on',
+                'sectionMessage'   => 'Client message',
+                'noMessage'        => 'No message',
+                'ctaText'          => 'Log in to the app to process this request',
+                'ctaButton'        => 'Open the app →',
+                'footer'           => 'This email was generated automatically',
+                'subjectPrefix'    => 'New booking',
+                'dupWarningTitle'  => 'Client possibly already exists',
+                'dupWarningBody'   => 'this CIN/passport number matches',
+                'dupWarningClient' => 'client',
+                'dupWarningCheck'  => 'Please verify before confirming whether this is the same person.',
+                'nightsSing' => 'day', 'nightsPlur' => 'days',
+                'yearsSing'  => 'year', 'yearsPlur' => 'years', 'and' => 'and',
+                'months'     => 'months', 'daysSing' => 'day', 'daysPlur' => 'days',
+            ],
+            'ar' => [
+                'headerSubtitle'   => 'طلب حجز جديد',
+                'sectionVehicle'   => 'السيارة والفترة',
+                'labelVehicle'     => 'السيارة',
+                'labelBureau'      => 'الفرع',
+                'labelDateStart'   => 'تاريخ الانطلاق',
+                'labelDateEnd'     => 'تاريخ الإرجاع',
+                'labelDuration'    => 'المدة',
+                'labelPricePerDay' => 'السعر / اليوم',
+                'labelTotal'       => 'التقدير الإجمالي',
+                'labelDelivery'    => 'مكان التسليم',
+                'sectionClient'    => 'معلومات العميل',
+                'labelFullName'    => 'الاسم الكامل',
+                'labelPhone'       => 'الهاتف',
+                'labelEmail'       => 'البريد الإلكتروني',
+                'labelLicenseIssued' => 'تاريخ إصدار رخصة القيادة',
+                'sectionMessage'   => 'رسالة العميل',
+                'noMessage'        => 'لا توجد رسالة',
+                'ctaText'          => 'سجّل الدخول إلى التطبيق لمعالجة هذا الطلب',
+                'ctaButton'        => '→ فتح التطبيق',
+                'footer'           => 'تم إنشاء هذا البريد الإلكتروني تلقائيًا',
+                'subjectPrefix'    => 'حجز جديد',
+                'dupWarningTitle'  => 'قد يكون هذا العميل موجودًا بالفعل',
+                'dupWarningBody'   => 'يطابق رقم البطاقة الوطنية/جواز السفر هذا',
+                'dupWarningClient' => 'العميل',
+                'dupWarningCheck'  => 'يرجى التحقق قبل التأكيد مما إذا كان هذا هو نفس الشخص.',
+                'nightsSing' => 'يوم', 'nightsPlur' => 'أيام',
+                'yearsSing'  => 'سنة', 'yearsPlur' => 'سنوات', 'and' => 'و',
+                'months'     => 'أشهر', 'daysSing' => 'يوم', 'daysPlur' => 'أيام',
+            ],
+        ];
+
+        return $strings[$langue] ?? $strings['fr'];
     }
 
     private function buildEmailHtml(
@@ -347,18 +460,20 @@ class PublicBookingController extends AbstractController
         ?float $effectiveDailyRate = null,
         ?\DateTimeImmutable $permisDelivreLe = null,
         ?Client $possibleDuplicateOf = null,
+        string $langue = 'fr',
     ): string {
+        $s = $this->emailStrings($langue);
         $fmt = fn(?string $val): string => $val ?? '—';
         $permisAnciennete = '';
         if ($permisDelivreLe) {
             $diff = $permisDelivreLe->diff(new \DateTimeImmutable('today'));
             if ($diff->y > 0) {
-                $permisAnciennete = $diff->y . ' an' . ($diff->y > 1 ? 's' : '')
-                    . ($diff->m > 0 ? ' et ' . $diff->m . ' mois' : '');
+                $permisAnciennete = $diff->y . ' ' . ($diff->y > 1 ? $s['yearsPlur'] : $s['yearsSing'])
+                    . ($diff->m > 0 ? ' ' . $s['and'] . ' ' . $diff->m . ' ' . $s['months'] : '');
             } elseif ($diff->m > 0) {
-                $permisAnciennete = $diff->m . ' mois';
+                $permisAnciennete = $diff->m . ' ' . $s['months'];
             } else {
-                $permisAnciennete = $diff->d . ' jour' . ($diff->d > 1 ? 's' : '');
+                $permisAnciennete = $diff->d . ' ' . ($diff->d > 1 ? $s['daysPlur'] : $s['daysSing']);
             }
         }
         $permisStr = $permisDelivreLe
@@ -369,14 +484,14 @@ class PublicBookingController extends AbstractController
         $car      = $fmt($v->getMarque()) . ' ' . $fmt($v->getModele()) . ($v->getAnnee() ? ' ' . $v->getAnnee() : '');
         $depart   = $b->getDateDebut()->format('d/m/Y');
         $retour   = $b->getDateFin()->format('d/m/Y');
-        $nightStr = $nights . ' jour' . ($nights > 1 ? 's' : '');
+        $nightStr = $nights . ' ' . ($nights > 1 ? $s['nightsPlur'] : $s['nightsSing']);
         // Effective rate (reflects any active seasonal rule), not the vehicle's raw base
         // rate -- same reasoning as $total above.
         $rateForDisplay = $effectiveDailyRate ?? ($v->getPrixJour() !== null ? (float) $v->getPrixJour() : null);
         $prixJ    = $rateForDisplay !== null ? number_format($rateForDisplay, 0, ',', ' ') . ' MAD/j' : '—';
         $totalStr = $total !== null ? number_format($total, 0, ',', ' ') . ' MAD' : '—';
         $livraison = $b->getLieuLivraison() ? htmlspecialchars($b->getLieuLivraison()) : '—';
-        $message   = $b->getMessage() ? nl2br(htmlspecialchars($b->getMessage())) : '<em style="color:#94a3b8">Aucun message</em>';
+        $message   = $b->getMessage() ? nl2br(htmlspecialchars($b->getMessage())) : "<em style=\"color:#94a3b8\">{$s['noMessage']}</em>";
 
         $duplicateWarningHtml = '';
         if ($possibleDuplicateOf) {
@@ -387,9 +502,9 @@ class PublicBookingController extends AbstractController
               <tr>
                 <td style="padding:14px 32px;background:#fffbeb;border-top:1px solid #fde68a;border-bottom:1px solid #fde68a">
                   <p style="margin:0;font-size:12.5px;color:#92400e;line-height:1.5">
-                    ⚠️ <strong>Client possiblement déjà existant</strong> — ce numéro CIN/passeport correspond à
-                    <strong>{$matchName}</strong> ({$matchPhone}), client #{$possibleDuplicateOf->getId()}.
-                    Vérifiez avant de confirmer s'il s'agit de la même personne.
+                    ⚠️ <strong>{$s['dupWarningTitle']}</strong> — {$s['dupWarningBody']}
+                    <strong>{$matchName}</strong> ({$matchPhone}), {$s['dupWarningClient']} #{$possibleDuplicateOf->getId()}.
+                    {$s['dupWarningCheck']}
                   </p>
                 </td>
               </tr>
@@ -404,9 +519,11 @@ class PublicBookingController extends AbstractController
               <td style=\"padding:10px 16px;border-bottom:1px solid #f1f5f9;font-size:13px;color:#1e293b;font-weight:600\">{$value}</td>
             </tr>";
 
+        $dir = $langue === 'ar' ? ' dir="rtl"' : '';
+
         return <<<HTML
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="{$langue}"{$dir}>
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
 <body style="margin:0;padding:0;background:#f8fafc;font-family:system-ui,-apple-system,sans-serif">
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;padding:32px 16px">
@@ -423,7 +540,7 @@ class PublicBookingController extends AbstractController
                     AGO<span style="color:#fbbf24">CAR</span>
                   </span>
                   <p style="margin:4px 0 0;font-size:12px;color:#94a3b8;text-transform:uppercase;letter-spacing:2px">
-                    Nouvelle demande de réservation
+                    {$s['headerSubtitle']}
                   </p>
                 </td>
                 <td align="right">
@@ -446,17 +563,17 @@ class PublicBookingController extends AbstractController
               <tr>
                 <td colspan="2" style="padding:20px 32px 8px;font-size:11px;font-weight:700;color:#f59e0b;
                                        text-transform:uppercase;letter-spacing:2px;border-bottom:2px solid #fef3c7">
-                  🚗 Véhicule &amp; Période
+                  🚗 {$s['sectionVehicle']}
                 </td>
               </tr>
-              {$row('Véhicule', $car)}
-              {$row('Bureau', $bureau)}
-              {$row('Date de départ', $depart)}
-              {$row('Date de retour', $retour)}
-              {$row('Durée', $nightStr)}
-              {$row('Prix / jour', $prixJ)}
-              {$row('Estimation totale', "<span style=\"color:#f59e0b;font-size:16px\">{$totalStr}</span>")}
-              {$row('Lieu de livraison', $livraison)}
+              {$row($s['labelVehicle'], $car)}
+              {$row($s['labelBureau'], $bureau)}
+              {$row($s['labelDateStart'], $depart)}
+              {$row($s['labelDateEnd'], $retour)}
+              {$row($s['labelDuration'], $nightStr)}
+              {$row($s['labelPricePerDay'], $prixJ)}
+              {$row($s['labelTotal'], "<span style=\"color:#f59e0b;font-size:16px\">{$totalStr}</span>")}
+              {$row($s['labelDelivery'], $livraison)}
             </table>
 
             <!-- Section: Client -->
@@ -464,13 +581,13 @@ class PublicBookingController extends AbstractController
               <tr>
                 <td colspan="2" style="padding:20px 32px 8px;font-size:11px;font-weight:700;color:#3b82f6;
                                        text-transform:uppercase;letter-spacing:2px;border-bottom:2px solid #dbeafe">
-                  👤 Informations Client
+                  👤 {$s['sectionClient']}
                 </td>
               </tr>
-              {$row('Nom complet', htmlspecialchars($b->getFullName()))}
-              {$row('Téléphone', htmlspecialchars($b->getPhone()))}
-              {$row('Email', htmlspecialchars($b->getEmail()))}
-              {$row('Permis délivré le', $permisStr)}
+              {$row($s['labelFullName'], htmlspecialchars($b->getFullName()))}
+              {$row($s['labelPhone'], htmlspecialchars($b->getPhone()))}
+              {$row($s['labelEmail'], htmlspecialchars($b->getEmail()))}
+              {$row($s['labelLicenseIssued'], $permisStr)}
             </table>
             {$duplicateWarningHtml}
 
@@ -479,7 +596,7 @@ class PublicBookingController extends AbstractController
               <tr>
                 <td style="padding:20px 32px 8px;font-size:11px;font-weight:700;color:#8b5cf6;
                            text-transform:uppercase;letter-spacing:2px;border-bottom:2px solid #ede9fe">
-                  💬 Message du client
+                  💬 {$s['sectionMessage']}
                 </td>
               </tr>
               <tr>
@@ -496,7 +613,7 @@ class PublicBookingController extends AbstractController
         <tr>
           <td style="background:#fafafa;padding:24px 32px;border-top:1px solid #f1f5f9">
             <p style="margin:0 0 12px;font-size:13px;color:#64748b;text-align:center">
-              Connectez-vous à l'application pour traiter cette demande
+              {$s['ctaText']}
             </p>
             <table width="100%" cellpadding="0" cellspacing="0">
               <tr>
@@ -504,7 +621,7 @@ class PublicBookingController extends AbstractController
                   <a href="https://agorent.com/admin/location/{$reservationId}"
                      style="display:inline-block;background:#fbbf24;color:#0f172a;font-size:14px;font-weight:700;
                             padding:12px 32px;border-radius:10px;text-decoration:none">
-                    Ouvrir l'application →
+                    {$s['ctaButton']}
                   </a>
                 </td>
               </tr>
@@ -516,7 +633,7 @@ class PublicBookingController extends AbstractController
         <tr>
           <td style="background:#0f172a;border-radius:0 0 16px 16px;padding:16px 32px;text-align:center">
             <p style="margin:0;font-size:11px;color:#475569">
-              © {$b->getCreeAu()->format('Y')} AGOCAR · Cet email est généré automatiquement
+              © {$b->getCreeAu()->format('Y')} AGOCAR · {$s['footer']}
             </p>
           </td>
         </tr>
