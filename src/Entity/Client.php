@@ -95,6 +95,17 @@ class Client
     #[ORM\Column(type: 'datetime_immutable', nullable: true)]
     private ?\DateTimeImmutable $deletedAt = null;
 
+    /** Set when this client's public-booking CIN/passport matched an already-existing
+     *  client at creation time -- never auto-merged, staff decide (see client dedup flow). */
+    #[ORM\ManyToOne(targetEntity: Client::class)]
+    #[ORM\JoinColumn(onDelete: 'SET NULL')]
+    private ?Client $possibleDuplicateOf = null;
+
+    /** Null = still an open flag for staff to review; set once someone has decided
+     *  (merged the two clients, or confirmed they're genuinely different people). */
+    #[ORM\Column(type: 'datetime_immutable', nullable: true)]
+    private ?\DateTimeImmutable $duplicateResolvedAt = null;
+
     public function getId(): ?int { return $this->id; }
     public function getNom(): ?string { return $this->nom; }
     public function setNom(string $nom): static { $this->nom = $nom; return $this; }
@@ -150,4 +161,8 @@ class Client
     public function setEditAu(?\DateTimeImmutable $editAu): static { $this->editAu = $editAu; return $this; }
     public function getDeletedAt(): ?\DateTimeImmutable { return $this->deletedAt; }
     public function setDeletedAt(?\DateTimeImmutable $deletedAt): static { $this->deletedAt = $deletedAt; return $this; }
+    public function getPossibleDuplicateOf(): ?Client { return $this->possibleDuplicateOf; }
+    public function setPossibleDuplicateOf(?Client $client): static { $this->possibleDuplicateOf = $client; return $this; }
+    public function getDuplicateResolvedAt(): ?\DateTimeImmutable { return $this->duplicateResolvedAt; }
+    public function setDuplicateResolvedAt(?\DateTimeImmutable $v): static { $this->duplicateResolvedAt = $v; return $this; }
 }

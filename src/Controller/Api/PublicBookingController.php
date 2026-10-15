@@ -130,6 +130,23 @@ class PublicBookingController extends AbstractController
         } else {
             $client->setCin($idNumber);
         }
+
+        // Possible-duplicate flag (phase 2 of client dedup): never auto-attach to the
+        // matched client -- this booking always gets its own new Client row, staff
+        // decide whether to merge (dashboard/email/reservation-page surfacing comes in
+        // a later phase; for now this just records the match).
+        $existingMatch = $em->createQueryBuilder()
+            ->select('c')->from(Client::class, 'c')
+            ->where('c.deletedAt IS NULL')
+            ->andWhere('c.cin = :idNumber OR c.passeport = :idNumber')
+            ->setParameter('idNumber', $idNumber)
+            ->setMaxResults(1)
+            ->getQuery()
+            ->getOneOrNullResult();
+        if ($existingMatch) {
+            $client->setPossibleDuplicateOf($existingMatch);
+        }
+
         $client->setAdresseMaroc('');
         $client->setBureau($voiture->getBureau());
         $client->setCreeAu(new \DateTimeImmutable());
