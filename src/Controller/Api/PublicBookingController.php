@@ -131,10 +131,10 @@ class PublicBookingController extends AbstractController
             $client->setCin($idNumber);
         }
 
-        // Possible-duplicate flag (phase 2 of client dedup): never auto-attach to the
-        // matched client -- this booking always gets its own new Client row, staff
-        // decide whether to merge (dashboard/email/reservation-page surfacing comes in
-        // a later phase; for now this just records the match).
+        // Possible-duplicate flag (client dedup): never auto-attach to the matched
+        // client -- this booking always gets its own new Client row, staff decide
+        // whether to merge (surfaced in the email below, the dashboard's pending card,
+        // and the reservation page).
         $existingMatch = $em->createQueryBuilder()
             ->select('c')->from(Client::class, 'c')
             ->where('c.deletedAt IS NULL')
@@ -196,7 +196,7 @@ class PublicBookingController extends AbstractController
                 $total = (float) $computed['total'];
                 $ref   = '#' . str_pad((string) $booking->getId(), 6, '0', STR_PAD_LEFT);
 
-                $html  = $this->buildEmailHtml($booking, $voiture, $nights, $total, $ref, $reservation->getId(), (float) $computed['prixParJour'], $permisDelivreLe);
+                $html  = $this->buildEmailHtml($booking, $voiture, $nights, $total, $ref, $reservation->getId(), (float) $computed['prixParJour'], $permisDelivreLe, $existingMatch);
                 $email = (new Email())
                     ->from($_ENV['MAILER_SENDER'] ?? 'noreply@agocar.ma')
                     ->subject("🚗 Nouvelle réservation {$ref} — {$voiture->getMarque()} {$voiture->getModele()}")
@@ -346,6 +346,7 @@ class PublicBookingController extends AbstractController
         int $reservationId,
         ?float $effectiveDailyRate = null,
         ?\DateTimeImmutable $permisDelivreLe = null,
+        ?Client $possibleDuplicateOf = null,
     ): string {
         $fmt = fn(?string $val): string => $val ?? '—';
         $permisAnciennete = '';
@@ -376,6 +377,25 @@ class PublicBookingController extends AbstractController
         $totalStr = $total !== null ? number_format($total, 0, ',', ' ') . ' MAD' : '—';
         $livraison = $b->getLieuLivraison() ? htmlspecialchars($b->getLieuLivraison()) : '—';
         $message   = $b->getMessage() ? nl2br(htmlspecialchars($b->getMessage())) : '<em style="color:#94a3b8">Aucun message</em>';
+
+        $duplicateWarningHtml = '';
+        if ($possibleDuplicateOf) {
+            $matchName = htmlspecialchars(trim($possibleDuplicateOf->getPrenom() . ' ' . $possibleDuplicateOf->getNom()));
+            $matchPhone = htmlspecialchars($possibleDuplicateOf->getTelephone() ?? '—');
+            $duplicateWarningHtml = <<<HTML
+            <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">
+              <tr>
+                <td style="padding:14px 32px;background:#fffbeb;border-top:1px solid #fde68a;border-bottom:1px solid #fde68a">
+                  <p style="margin:0;font-size:12.5px;color:#92400e;line-height:1.5">
+                    ⚠️ <strong>Client possiblement déjà existant</strong> — ce numéro CIN/passeport correspond à
+                    <strong>{$matchName}</strong> ({$matchPhone}), client #{$possibleDuplicateOf->getId()}.
+                    Vérifiez avant de confirmer s'il s'agit de la même personne.
+                  </p>
+                </td>
+              </tr>
+            </table>
+            HTML;
+        }
         $bureau    = $v->getBureau()?->getNom() ?? '—';
 
         $row = fn(string $label, string $value): string =>
@@ -452,6 +472,7 @@ class PublicBookingController extends AbstractController
               {$row('Email', htmlspecialchars($b->getEmail()))}
               {$row('Permis délivré le', $permisStr)}
             </table>
+            {$duplicateWarningHtml}
 
             <!-- Message -->
             <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">

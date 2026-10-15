@@ -226,16 +226,37 @@ class LocationController extends AbstractController
 
         $em->persist($delivery);
 
-        // ── Create Damage records for each reported damaged part at hand-over ──
-        if (!empty($data['damagedParts']) && is_array($data['damagedParts'])) {
-            foreach ($data['damagedParts'] as $partId) {
+        // ── Replace Damage records for this delivery with exactly what was submitted ──
+        // (clear-then-reinsert, not append-only, so re-saving the same delivery doesn't
+        // duplicate every damage row it already wrote)
+        if (array_key_exists('damagedParts', $data) || array_key_exists('damageDetails', $data)) {
+            foreach ($delivery->getDamages() as $existingDamage) {
+                $em->remove($existingDamage);
+            }
+
+            $detailsByZone = [];
+            foreach ((is_array($data['damageDetails'] ?? null) ? $data['damageDetails'] : []) as $detail) {
+                if (is_array($detail) && !empty($detail['zone']) && is_string($detail['zone'])) {
+                    $detailsByZone[$detail['zone']] = $detail;
+                }
+            }
+            $parts = is_array($data['damagedParts'] ?? null) ? $data['damagedParts'] : array_keys($detailsByZone);
+
+            foreach ($parts as $partId) {
                 if (!is_string($partId) || strlen($partId) > 30) {
                     continue;
+                }
+                $detail   = $detailsByZone[$partId] ?? [];
+                $severity = $detail['severity'] ?? 'scratch';
+                if (!in_array($severity, ['scratch', 'dent', 'crack', 'broken'], true)) {
+                    $severity = 'scratch';
                 }
                 $damage = new Damage();
                 $damage->setVehicleDelivery($delivery);
                 $damage->setZone($partId);
-                $damage->setSeverity('scratch');
+                $damage->setSeverity($severity);
+                $damage->setDescription(!empty($detail['description']) && is_string($detail['description']) ? trim($detail['description']) : null);
+                $damage->setPhoto(!empty($detail['photo']) && is_string($detail['photo']) && strlen($detail['photo']) <= 255 ? $detail['photo'] : null);
                 $damage->setStatus('open');
                 $em->persist($damage);
             }
@@ -347,19 +368,41 @@ class LocationController extends AbstractController
 
         $em->persist($inspection);
 
-        // ── Create Damage records for each reported damaged part ────────────
-        if (!empty($data['damagedParts']) && is_array($data['damagedParts']) && $inspection->getCondition() !== 'clean') {
-            $severity = $inspection->getCondition() === 'major_damage' ? 'dent' : 'scratch';
-            foreach ($data['damagedParts'] as $partId) {
-                if (!is_string($partId) || strlen($partId) > 30) {
-                    continue;
+        // ── Replace Damage records for this return inspection with exactly what was
+        // submitted (clear-then-reinsert, same reasoning as the delivery side) ──
+        if (array_key_exists('damagedParts', $data) || array_key_exists('damageDetails', $data)) {
+            foreach ($inspection->getDamageItems() as $existingDamage) {
+                $em->remove($existingDamage);
+            }
+
+            if ($inspection->getCondition() !== 'clean') {
+                $detailsByZone = [];
+                foreach ((is_array($data['damageDetails'] ?? null) ? $data['damageDetails'] : []) as $detail) {
+                    if (is_array($detail) && !empty($detail['zone']) && is_string($detail['zone'])) {
+                        $detailsByZone[$detail['zone']] = $detail;
+                    }
                 }
-                $damage = new Damage();
-                $damage->setReturnInspection($inspection);
-                $damage->setZone($partId);
-                $damage->setSeverity($severity);
-                $damage->setStatus('open');
-                $em->persist($damage);
+                $parts = is_array($data['damagedParts'] ?? null) ? $data['damagedParts'] : array_keys($detailsByZone);
+                $defaultSeverity = $inspection->getCondition() === 'major_damage' ? 'dent' : 'scratch';
+
+                foreach ($parts as $partId) {
+                    if (!is_string($partId) || strlen($partId) > 30) {
+                        continue;
+                    }
+                    $detail   = $detailsByZone[$partId] ?? [];
+                    $severity = $detail['severity'] ?? $defaultSeverity;
+                    if (!in_array($severity, ['scratch', 'dent', 'crack', 'broken'], true)) {
+                        $severity = $defaultSeverity;
+                    }
+                    $damage = new Damage();
+                    $damage->setReturnInspection($inspection);
+                    $damage->setZone($partId);
+                    $damage->setSeverity($severity);
+                    $damage->setDescription(!empty($detail['description']) && is_string($detail['description']) ? trim($detail['description']) : null);
+                    $damage->setPhoto(!empty($detail['photo']) && is_string($detail['photo']) && strlen($detail['photo']) <= 255 ? $detail['photo'] : null);
+                    $damage->setStatus('open');
+                    $em->persist($damage);
+                }
             }
         }
 
@@ -618,6 +661,12 @@ class LocationController extends AbstractController
                 'lieuNaissance'      => $client->getLieuNaissance(),
                 'adresseMaroc'       => $client->getAdresseMaroc(),
                 'adresseEtranger'    => $client->getAdresseEtranger(),
+                'possibleDuplicate'  => ($client->getPossibleDuplicateOf() && !$client->getDuplicateResolvedAt()) ? [
+                    'clientId' => $client->getPossibleDuplicateOf()->getId(),
+                    'nom'      => $client->getPossibleDuplicateOf()->getNom(),
+                    'prenom'   => $client->getPossibleDuplicateOf()->getPrenom(),
+                    'telephone'=> $client->getPossibleDuplicateOf()->getTelephone(),
+                ] : null,
             ] : null,
             'deuxiemeChauffeur' => $dc ? [
                 'id'                 => $dc->getId(),
@@ -681,7 +730,9 @@ class LocationController extends AbstractController
                 'id'          => $dmg->getId(),
                 'zone'        => $dmg->getZone(),
                 'type'        => $dmg->getSeverity(),
+                'severity'    => $dmg->getSeverity(),
                 'description' => $dmg->getDescription(),
+                'photo'       => $dmg->getPhoto(),
                 'x'           => $dmg->getX(),
                 'y'           => $dmg->getY(),
             ], $d->getDamages()->toArray()),
@@ -732,7 +783,9 @@ class LocationController extends AbstractController
                 'id'          => $dmg->getId(),
                 'zone'        => $dmg->getZone(),
                 'type'        => $dmg->getSeverity(),
+                'severity'    => $dmg->getSeverity(),
                 'description' => $dmg->getDescription(),
+                'photo'       => $dmg->getPhoto(),
                 'x'           => $dmg->getX(),
                 'y'           => $dmg->getY(),
             ], $i->getDamageItems()->toArray()),

@@ -6,6 +6,7 @@ use App\Entity\DeuxiemeChauffeur;
 use App\Entity\Paiement;
 use App\Entity\Reservation;
 use App\Enum\StatusEnum;
+use App\Enum\VehicleLifecycleState;
 use App\Repository\AccessoireRepository;
 use App\Repository\PaiementRepository;
 use App\Repository\ReservationRepository;
@@ -108,7 +109,15 @@ class ReservationController extends AbstractController
 
         $serialize = fn($r) => [
             'id'               => $r->getId(),
-            'client'           => ['id' => $r->getClient()?->getId(), 'nom' => $r->getClient()?->getNom(), 'prenom' => $r->getClient()?->getPrenom(), 'telephone' => $r->getClient()?->getTelephone()],
+            'client'           => [
+                'id' => $r->getClient()?->getId(), 'nom' => $r->getClient()?->getNom(), 'prenom' => $r->getClient()?->getPrenom(), 'telephone' => $r->getClient()?->getTelephone(),
+                'possibleDuplicate' => ($r->getClient()?->getPossibleDuplicateOf() && !$r->getClient()?->getDuplicateResolvedAt()) ? [
+                    'clientId' => $r->getClient()->getPossibleDuplicateOf()->getId(),
+                    'nom'      => $r->getClient()->getPossibleDuplicateOf()->getNom(),
+                    'prenom'   => $r->getClient()->getPossibleDuplicateOf()->getPrenom(),
+                    'telephone'=> $r->getClient()->getPossibleDuplicateOf()->getTelephone(),
+                ] : null,
+            ],
             'voiture'          => ['id' => $r->getVoiture()?->getId(), 'marque' => $r->getVoiture()?->getMarque(), 'modele' => $r->getVoiture()?->getModele(), 'immatriculation' => $r->getVoiture()?->getImmatriculation(), 'image' => $r->getVoiture()?->getImagePath()],
             'dateDebut'        => $r->getDateDebut()?->format('Y-m-d\TH:i'),
             'dateFin'          => $r->getDateFin()?->format('Y-m-d\TH:i'),
@@ -152,6 +161,12 @@ class ReservationController extends AbstractController
                 'permisConduite'  => $reservation->getClient()?->getPermisConduite(),
                 'nationalite'     => $reservation->getClient()?->getNationalite(),
                 'passeport'       => $reservation->getClient()?->getPasseport(),
+                'possibleDuplicate' => ($reservation->getClient()?->getPossibleDuplicateOf() && !$reservation->getClient()?->getDuplicateResolvedAt()) ? [
+                    'clientId' => $reservation->getClient()->getPossibleDuplicateOf()->getId(),
+                    'nom'      => $reservation->getClient()->getPossibleDuplicateOf()->getNom(),
+                    'prenom'   => $reservation->getClient()->getPossibleDuplicateOf()->getPrenom(),
+                    'telephone'=> $reservation->getClient()->getPossibleDuplicateOf()->getTelephone(),
+                ] : null,
             ],
             'voiture'           => [
                 'id'             => $reservation->getVoiture()?->getId(),
@@ -219,6 +234,19 @@ class ReservationController extends AbstractController
 
         if (!$client || !$voiture) {
             return $this->json(['error' => 'Client ou voiture introuvable'], 404);
+        }
+
+        // Server-side guard mirroring VehicleLifecycleState::blocksRental() -- the frontend
+        // car pickers already filter these out, but nothing previously stopped a direct API
+        // call (or a stale/cached car list) from booking a car that's in maintenance, sold,
+        // decommissioned, etc.
+        $lifecycleState = VehicleLifecycleState::tryFrom($voiture->getVoitureStatus() ?? '');
+        if ($lifecycleState?->blocksRental()) {
+            return $this->json([
+                'error'   => 'vehicle_unavailable',
+                'message' => 'Ce véhicule n\'est pas disponible à la location dans son état actuel.',
+                'state'   => $lifecycleState->value,
+            ], 422);
         }
 
         $dateDebut = new \DateTimeImmutable($data['dateDebut']);
