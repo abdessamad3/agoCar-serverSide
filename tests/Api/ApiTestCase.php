@@ -42,6 +42,17 @@ abstract class ApiTestCase extends WebTestCase
         foreach ([
             'reservation', 'voiture', 'client', 'utilisateur', 'bureau', 'company',
             'contrat', 'vehicle_delivery', 'vehicle_return_inspection', 'damage', 'paiement',
+            // Added Phase 12.5: these weren't wiped, so a UNIQUE constraint
+            // (e.g. credit.voiture_id) could collide with a row a PREVIOUS
+            // test left behind in an untruncated table, even though the
+            // table it references (voiture) resets its auto-increment every test.
+            'credit', 'achat_voiture', 'achat_installment', 'vente',
+            'financial_institution', 'vehicle_credit', 'vehicle_credit_payment',
+            'vehicle_credit_document', 'vehicle_credit_reminder', 'payment_attachment',
+            'depense', 'paiement_depense',
+            // Added Phase 12.6: reparation/assurance needed by the vehicle-sale
+            // regression tests (open-repair blocking, insurance archiving).
+            'reparation', 'assurance',
         ] as $table) {
             $conn->executeStatement("TRUNCATE TABLE `$table`");
         }

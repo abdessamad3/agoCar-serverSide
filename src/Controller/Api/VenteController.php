@@ -27,6 +27,21 @@ class VenteController extends AbstractController
         private FleetLifecycleManager $flm,
     ) {}
 
+    /** Phase 12.5: create() is deliberately NOT gated here -- confirmed (by
+     *  reading voiture.service.ts::recordSale() and voiture-detail.component.ts)
+     *  that ROLE_STAFF records a vehicle sale as part of the ROLE_STAFF-reachable
+     *  /voiture/:id page, not only through the dedicated /vente admin page.
+     *  update()/delete() ARE restricted below: confirmed their only consumer is
+     *  vente-list.component.ts, behind the /vente route which Angular already
+     *  gates to ROLE_ADMIN/ROLE_MANAGER. Explicit OR-check, not a standalone
+     *  ROLE_MANAGER attribute -- no role hierarchy exists. */
+    private function assertCanManage(): void
+    {
+        if (!$this->isGranted('ROLE_ADMIN') && !$this->isGranted('ROLE_MANAGER')) {
+            throw $this->createAccessDeniedException('Seuls les administrateurs et gestionnaires peuvent modifier les ventes.');
+        }
+    }
+
     /** Bureau-locked staff/managers may only touch sales belonging to their own
      *  bureau. True admins (getEffectiveBureauId() === null) are unrestricted. */
     private function assertBureauAccess(Vente $vente): void
@@ -156,6 +171,7 @@ class VenteController extends AbstractController
     #[Route('/{id}', name: 'update', methods: ['PUT'])]
     public function update(Vente $vente, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertCanManage();
         $this->assertBureauAccess($vente);
         $data = json_decode($request->getContent(), true);
 
@@ -173,6 +189,7 @@ class VenteController extends AbstractController
     #[Route('/{id}', name: 'delete', methods: ['DELETE'])]
     public function delete(Vente $vente, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertCanManage();
         $this->assertBureauAccess($vente);
         $vente->setDeletedAt(new \DateTimeImmutable());
         $em->flush();

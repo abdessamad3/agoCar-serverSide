@@ -134,7 +134,10 @@ class ReservationController extends AbstractController
             'creeAu'           => $r->getCreeAu()?->format('Y-m-d H:i:s'),
         ];
 
-        [$reservations, $total] = $this->paginateQb($qb, $page, $voitureId > 0);
+        // Scoped to one entity (a single vehicle's or a single client's own reservations) --
+        // bounded by nature, so return everything instead of silently truncating at the
+        // generic page size (matches the pre-existing voitureId behavior).
+        [$reservations, $total] = $this->paginateQb($qb, $page, $voitureId > 0 || (bool) $clientId);
         return $this->json(['data' => array_map($serialize, $reservations), 'meta' => $this->paginateMeta($total, $page)]);
     }
 

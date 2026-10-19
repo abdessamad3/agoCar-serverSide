@@ -44,10 +44,13 @@ class DamageController extends AbstractController
             ->select('dmg')
             ->from(Damage::class, 'dmg')
             ->leftJoin('dmg.returnInspection', 'ri')
-            ->leftJoin('ri.reservation', 'res')
+            ->leftJoin('ri.reservation', 'resRet')
+            ->leftJoin('dmg.vehicleDelivery', 'del')
+            ->leftJoin('del.reservation', 'resDel')
             ->where(
                 $em->createQueryBuilder()->expr()->orX(
-                    'res.voiture = :voiture',
+                    'resRet.voiture = :voiture',
+                    'resDel.voiture = :voiture',
                     'dmg.voiture = :voiture'
                 )
             )
@@ -57,6 +60,39 @@ class DamageController extends AbstractController
         $damages = $qb->getQuery()->getResult();
 
         return $this->json(array_map(fn(Damage $d) => $this->serialize($d, $em), $damages));
+    }
+
+    // ── POST /api/damage-photo ───────────────────────────────────────────────
+    // Stateless photo upload for a damage mark on the delivery/return diagram —
+    // the Damage row doesn't exist yet at that point (it's only created when the
+    // delivery/return is saved), so this just stores the file and hands back a
+    // path the caller attaches to the damage entry it sends on that save.
+
+    #[Route('/damage-photo', name: 'upload_photo', methods: ['POST'])]
+    public function uploadPhoto(Request $request): JsonResponse
+    {
+        $file = $request->files->get('photo');
+        if (!$file) {
+            return $this->json(['error' => 'Aucun fichier reçu.'], Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $allowedMimes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+        if (!in_array($file->getMimeType(), $allowedMimes, true)) {
+            return $this->json(['error' => 'Format d\'image non supporté.'], Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+        if ($file->getSize() > 10 * 1024 * 1024) {
+            return $this->json(['error' => 'Image trop volumineuse (max 10 Mo).'], Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $uploadDir = $this->getParameter('kernel.project_dir') . '/public/uploads/damage-photos/';
+        if (!is_dir($uploadDir)) {
+            mkdir($uploadDir, 0775, true);
+        }
+        $ext      = $file->guessExtension() ?? 'jpg';
+        $fileName = uniqid('dmgphoto_') . '.' . $ext;
+        $file->move($uploadDir, $fileName);
+
+        return $this->json(['path' => '/uploads/damage-photos/' . $fileName], Response::HTTP_CREATED);
     }
 
     // ── POST /api/voiture/{id}/damage ────────────────────────────────────────
@@ -161,7 +197,9 @@ class DamageController extends AbstractController
         $damage->setStatus('repaired');
         $damage->setRepairedAt(new \DateTimeImmutable());
 
-        $voiture     = $damage->getVoiture() ?? $damage->getReturnInspection()?->getReservation()?->getVoiture();
+        $voiture     = $damage->getVoiture()
+            ?? $damage->getReturnInspection()?->getReservation()?->getVoiture()
+            ?? $damage->getVehicleDelivery()?->getReservation()?->getVoiture();
         $amountPaid  = (float) ($request->request->get('amountPaid', 0));
         $estimatedCost = $damage->getEstimatedCost() ? (float) $damage->getEstimatedCost() : null;
         $depenseMontant = $estimatedCost ?? ($amountPaid > 0 ? $amountPaid : 0);
@@ -320,15 +358,19 @@ class DamageController extends AbstractController
             return new Response('Véhicule introuvable', Response::HTTP_NOT_FOUND);
         }
 
-        // Fetch all damages (same logic as list)
+        // Fetch all damages (same logic as list() -- including the delivery join, so a
+        // damage recorded only at hand-over still shows up in the report)
         $qb = $em->createQueryBuilder()
             ->select('dmg')
             ->from(Damage::class, 'dmg')
             ->leftJoin('dmg.returnInspection', 'ri')
-            ->leftJoin('ri.reservation', 'res')
+            ->leftJoin('ri.reservation', 'resRet')
+            ->leftJoin('dmg.vehicleDelivery', 'del')
+            ->leftJoin('del.reservation', 'resDel')
             ->where(
                 $em->createQueryBuilder()->expr()->orX(
-                    'res.voiture = :voiture',
+                    'resRet.voiture = :voiture',
+                    'resDel.voiture = :voiture',
                     'dmg.voiture = :voiture'
                 )
             )
@@ -409,21 +451,19 @@ class DamageController extends AbstractController
             'bureau'           => $voiture->getBureau(),
         ];
 
-        $html = $this->renderView('pdf/damage_report.html.twig', [
-            'voiture'        => $voitureData,
-            'damages'        => $serializedDamages,
-            'zoneLabels'     => $zoneLabels,
-            'severityLabels' => $severityLabels,
-            'openCount'      => $openCount,
-            'repairedCount'  => $repairedCount,
-            'totalCost'      => $totalCost,
-            'lastInspection' => $inspectionData,
-        ]);
+        $html = $this->buildDamageReportHtml(
+            $voitureData, $serializedDamages, $zoneLabels, $severityLabels,
+            $openCount, $repairedCount, $totalCost, $inspectionData,
+        );
 
         $options = new Options();
         $options->set('isHtml5ParserEnabled', true);
         $options->set('isRemoteEnabled', false);
         $options->set('defaultFont', 'DejaVu Sans');
+        // Without this, Dompdf's default chroot silently refuses to read the uploaded
+        // damage photos (outside its own library path) and renders a broken-image icon
+        // instead of the real photo, with no error — this is what that looked like.
+        $options->set('chroot', realpath($this->getParameter('kernel.project_dir') . '/public'));
 
         $dompdf = new Dompdf($options);
         $dompdf->loadHtml($html);
@@ -440,15 +480,155 @@ class DamageController extends AbstractController
             Response::HTTP_OK,
             [
                 'Content-Type'        => 'application/pdf',
-                'Content-Disposition' => sprintf('inline; filename="%s"', $filename),
+                'Content-Disposition' => sprintf('attachment; filename="%s"', $filename),
             ]
         );
+    }
+
+    /** Builds the damage report as plain HTML for Dompdf — same approach as every other
+     *  PDF in this app (contract, client booking recap): inline styles, no flex/grid,
+     *  no SVG. There is no Twig template for this; renderView() against a non-existent
+     *  one was silently 500-ing every time the "Rapport PDF" button was clicked. */
+    private function buildDamageReportHtml(
+        array $voiture,
+        array $damages,
+        array $zoneLabels,
+        array $severityLabels,
+        int $openCount,
+        int $repairedCount,
+        float $totalCost,
+        ?array $lastInspection,
+    ): string {
+        $esc = fn(?string $v): string => htmlspecialchars($v ?? '', ENT_QUOTES, 'UTF-8');
+        $car = trim($esc($voiture['marque']) . ' ' . $esc($voiture['modele']) . ($voiture['annee'] ? ' ' . $voiture['annee'] : ''));
+
+        $uploadRoot = $this->getParameter('kernel.project_dir') . '/public';
+        $photoTag = function (?string $photo) use ($uploadRoot): string {
+            if (!$photo) return '';
+            $abs = $uploadRoot . $photo;
+            if (!is_file($abs)) return '';
+            return '<img src="' . htmlspecialchars($abs, ENT_QUOTES, 'UTF-8') . '" class="dmgr-photo" />';
+        };
+
+        $rows = '';
+        foreach ($damages as $d) {
+            $zoneLabel = $zoneLabels[$d['zone']] ?? $d['zone'];
+            $sevLabel  = $severityLabels[$d['severity']] ?? $d['severity'];
+            $statusLabel = $d['status'] === 'repaired' ? 'Réparé' : 'Ouvert';
+            $statusClass = $d['status'] === 'repaired' ? 'dmgr-status-repaired' : 'dmgr-status-open';
+            $sourceLabel = match ($d['source'] ?? 'unknown') {
+                'delivery' => 'Livraison', 'return' => 'Retour', 'manual' => 'Manuel', default => '—',
+            };
+            $cost = $d['repairMontant'] !== null ? number_format((float) $d['repairMontant'], 2, ',', ' ') . ' MAD' : '—';
+            $date = $d['creeAu'] ? (new \DateTimeImmutable($d['creeAu']))->format('d/m/Y') : '—';
+
+            $rows .= '<tr>'
+                . '<td>' . $esc($zoneLabel) . '</td>'
+                . '<td>' . $esc($sevLabel) . '</td>'
+                . '<td>' . $esc($sourceLabel) . '</td>'
+                . '<td>' . $esc($date) . '</td>'
+                . '<td><span class="dmgr-badge ' . $statusClass . '">' . $statusLabel . '</span></td>'
+                . '<td>' . $cost . '</td>'
+                . '<td>' . $esc($d['description'] ?? '') . '</td>'
+                . '<td>' . $photoTag($d['photo'] ?? null) . '</td>'
+                . '</tr>';
+        }
+        if ($rows === '') {
+            $rows = '<tr><td colspan="8" class="dmgr-empty">Aucun dommage enregistré.</td></tr>';
+        }
+
+        $inspectionBlock = '';
+        if ($lastInspection) {
+            $condLabel = match ($lastInspection['condition']) {
+                'major_damage' => 'Dommage majeur', 'minor_damage' => 'Dommage mineur', default => 'Propre',
+            };
+            $inspectionBlock = '<div class="dmgr-section-title">Dernière inspection de retour</div>'
+                . '<table class="dmgr-kv">'
+                . '<tr><td>État général</td><td>' . $esc($condLabel) . '</td></tr>'
+                . '<tr><td>Kilométrage</td><td>' . $esc((string) ($lastInspection['kilometrage'] ?? '—')) . ' km</td></tr>'
+                . '<tr><td>Niveau carburant</td><td>' . $esc($lastInspection['fuelLevel'] ?? '—') . '</td></tr>'
+                . ($lastInspection['notes'] ? '<tr><td>Notes</td><td>' . $esc($lastInspection['notes']) . '</td></tr>' : '')
+                . '</table>';
+        }
+
+        $totalCostStr = number_format($totalCost, 2, ',', ' ') . ' MAD';
+
+        return <<<HTML
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font-family: 'DejaVu Sans', sans-serif; color: #1e293b; margin: 0; padding: 0; font-size: 11px; }
+    .dmgr-header { background: #0f172a; padding: 20px 28px; }
+    .dmgr-brand { font-size: 18px; font-weight: bold; color: #ffffff; }
+    .dmgr-brand .accent { color: #fbbf24; }
+    .dmgr-subtitle { font-size: 10px; color: #94a3b8; text-transform: uppercase; letter-spacing: 1.5px; margin-top: 3px; }
+    .dmgr-body { padding: 20px 28px; }
+    .dmgr-section-title { font-size: 10px; font-weight: bold; color: #f59e0b; text-transform: uppercase;
+                           letter-spacing: 1.5px; border-bottom: 2px solid #fef3c7; padding-bottom: 5px; margin: 16px 0 6px; }
+    table.dmgr-kv { width: 100%; border-collapse: collapse; font-size: 11px; }
+    table.dmgr-kv td:first-child { color: #64748b; width: 32%; padding: 5px 0; border-bottom: 1px solid #e2e8f0; }
+    table.dmgr-kv td:last-child  { font-weight: bold; padding: 5px 0; border-bottom: 1px solid #e2e8f0; }
+    .dmgr-stats { width: 100%; margin-top: 10px; }
+    .dmgr-stat { display: inline-block; width: 31%; margin-right: 2%; background: #f8fafc; border: 1px solid #e2e8f0;
+                 border-radius: 6px; padding: 10px; text-align: center; }
+    .dmgr-stat-value { font-size: 18px; font-weight: bold; color: #0f172a; }
+    .dmgr-stat-label { font-size: 9px; color: #64748b; text-transform: uppercase; letter-spacing: 1px; }
+    table.dmgr-list { width: 100%; border-collapse: collapse; font-size: 9.5px; margin-top: 8px; }
+    table.dmgr-list th { background: #f1f5f9; text-align: left; padding: 6px; border-bottom: 2px solid #cbd5e1; }
+    table.dmgr-list td { padding: 6px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+    .dmgr-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 8.5px; font-weight: bold; }
+    .dmgr-status-open { background: #fef3c7; color: #92400e; }
+    .dmgr-status-repaired { background: #dcfce7; color: #166534; }
+    .dmgr-empty { text-align: center; color: #94a3b8; padding: 16px; }
+    .dmgr-photo { width: 110px; height: 110px; object-fit: cover; border-radius: 4px; border: 1px solid #cbd5e1; }
+    .dmgr-footer { padding: 12px 28px; font-size: 9px; color: #94a3b8; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="dmgr-header">
+    <div class="dmgr-brand">AGO<span class="accent">CAR</span></div>
+    <div class="dmgr-subtitle">Rapport des dommages véhicule</div>
+  </div>
+
+  <div class="dmgr-body">
+    <div class="dmgr-section-title">Véhicule</div>
+    <table class="dmgr-kv">
+      <tr><td>Véhicule</td><td>{$car}</td></tr>
+      <tr><td>Immatriculation</td><td>{$esc($voiture['immatriculation'])}</td></tr>
+      <tr><td>Couleur</td><td>{$esc($voiture['couleur'])}</td></tr>
+      <tr><td>Kilométrage actuel</td><td>{$esc((string) ($voiture['kilometrageActuel'] ?? '—'))} km</td></tr>
+    </table>
+
+    <div class="dmgr-stats">
+      <div class="dmgr-stat"><div class="dmgr-stat-value">{$openCount}</div><div class="dmgr-stat-label">Dommages ouverts</div></div>
+      <div class="dmgr-stat"><div class="dmgr-stat-value">{$repairedCount}</div><div class="dmgr-stat-label">Réparés</div></div>
+      <div class="dmgr-stat"><div class="dmgr-stat-value">{$totalCostStr}</div><div class="dmgr-stat-label">Coût total réparations</div></div>
+    </div>
+
+    {$inspectionBlock}
+
+    <div class="dmgr-section-title">Historique des dommages</div>
+    <table class="dmgr-list">
+      <tr>
+        <th>Zone</th><th>Sévérité</th><th>Origine</th><th>Date</th><th>Statut</th><th>Coût</th><th>Description</th><th>Photo</th>
+      </tr>
+      {$rows}
+    </table>
+  </div>
+
+  <div class="dmgr-footer">Généré le {$esc(date('d/m/Y à H:i'))} · AGOCAR</div>
+</body>
+</html>
+HTML;
     }
 
     private function serialize(Damage $d, EntityManagerInterface $em): array
     {
         $ri  = $d->getReturnInspection();
-        $res = $ri?->getReservation();
+        $del = $d->getVehicleDelivery();
+        $res = $ri?->getReservation() ?? $del?->getReservation();
 
         // Resolve depense: prefer direct depenseId, fallback to reparationId → Reparation → Depense
         $depenseId         = $d->getDepenseId();
@@ -474,6 +654,7 @@ class DamageController extends AbstractController
             'severity'          => $d->getSeverity(),
             'status'            => $d->getStatus(),
             'description'       => $d->getDescription(),
+            'photo'             => $d->getPhoto(),
             'estimatedCost'     => $d->getEstimatedCost(),
             'reparationId'      => $d->getReparationId(),
             'depenseId'         => $depenseId,
@@ -483,7 +664,13 @@ class DamageController extends AbstractController
             'repairedAt'        => $d->getRepairedAt()?->format(\DateTimeInterface::ATOM),
             'reservationId'     => $res?->getId(),
             'inspectionId'      => $ri?->getId(),
-            'source'            => $d->getVoiture() !== null ? 'manual' : 'inspection',
+            'deliveryId'        => $del?->getId(),
+            'source'            => match (true) {
+                $d->getVoiture() !== null => 'manual',
+                $ri !== null              => 'return',
+                $del !== null             => 'delivery',
+                default                   => 'unknown',
+            },
         ];
     }
 }

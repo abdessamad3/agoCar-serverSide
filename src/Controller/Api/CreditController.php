@@ -25,6 +25,20 @@ class CreditController extends AbstractController
     use BureauAwareTrait;
     use PaginationTrait;
 
+    /** Mutations here are confirmed (Phase 12.5) reachable ONLY from the
+     *  /credit admin page, which Angular already gates to ROLE_ADMIN/ROLE_MANAGER
+     *  -- no other page or shared service calls create/update/delete on this
+     *  legacy resource. Explicit OR-check, not a standalone ROLE_MANAGER
+     *  attribute: there is no role hierarchy, so ROLE_ADMIN does not imply
+     *  ROLE_MANAGER and both must be checked. Read access (list/show) is left
+     *  open -- unaffected by this change. */
+    private function assertCanManage(): void
+    {
+        if (!$this->isGranted('ROLE_ADMIN') && !$this->isGranted('ROLE_MANAGER')) {
+            throw $this->createAccessDeniedException('Seuls les administrateurs et gestionnaires peuvent modifier les crédits.');
+        }
+    }
+
     /** Bureau-locked staff/managers may only touch legacy credits belonging to their
      *  own bureau. True admins (getEffectiveBureauId() === null) are unrestricted. */
     private function assertBureauAccess(Credit $credit): void
@@ -101,6 +115,7 @@ class CreditController extends AbstractController
         EntityManagerInterface $em,
         VoitureRepository $voitureRepo
     ): JsonResponse {
+        $this->assertCanManage();
         $data = json_decode($request->getContent(), true);
 
         $credit = new Credit();
@@ -127,6 +142,7 @@ class CreditController extends AbstractController
     #[Route('/{id}', name: 'update', methods: ['PUT'])]
     public function update(Credit $credit, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertCanManage();
         $this->assertBureauAccess($credit);
         $data = json_decode($request->getContent(), true);
 
@@ -146,6 +162,7 @@ class CreditController extends AbstractController
     #[Route('/{id}', name: 'delete', methods: ['DELETE'])]
     public function delete(Credit $credit, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertCanManage();
         $this->assertBureauAccess($credit);
         $credit->setDeletedAt(new \DateTimeImmutable());
         $em->flush();

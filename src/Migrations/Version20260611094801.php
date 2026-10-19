@@ -48,6 +48,23 @@ final class Version20260611094801 extends AbstractMigration
             $this->addSql('ALTER TABLE contract_extension ADD CONSTRAINT FK_B22065E11823061F FOREIGN KEY (contrat_id) REFERENCES contrat (id) ON DELETE CASCADE');
         }
 
+        // ── Block C: vehicle_delivery ────────────────────────────────────────
+        // Moved ahead of Block B (Phase 12.6): damage.vehicle_delivery_id's FK
+        // below targets this table, so it must exist first. On a truly empty
+        // database, running Block B before Block C failed with "Can't create
+        // table damage (errno 150)" -- MariaDB's error text for an ALTER TABLE
+        // ADD CONSTRAINT whose target table doesn't exist yet. Every
+        // already-migrated database (dev, test) already has this version
+        // recorded as executed in doctrine_migration_versions, so Doctrine
+        // Migrations never re-runs this file's SQL there -- this reorder only
+        // changes behavior for a database that hasn't reached this version yet.
+        if (!$this->tableExists('vehicle_delivery')) {
+            $this->addSql('CREATE TABLE vehicle_delivery (id INT AUTO_INCREMENT NOT NULL, reservation_id INT NOT NULL, fuel_level_out VARCHAR(30) DEFAULT \'vide\' NOT NULL, mileage_out INT DEFAULT NULL, has_extincteur TINYINT(1) DEFAULT 0 NOT NULL, has_lavage TINYINT(1) DEFAULT 0 NOT NULL, has_plaque_depannage TINYINT(1) DEFAULT 0 NOT NULL, has_cric TINYINT(1) DEFAULT 0 NOT NULL, has_gilet TINYINT(1) DEFAULT 0 NOT NULL, has_roue_secours TINYINT(1) DEFAULT 0 NOT NULL, has_siege_bebe TINYINT(1) DEFAULT 0 NOT NULL, equipement_notes LONGTEXT DEFAULT NULL, delivery_notes LONGTEXT DEFAULT NULL, signature_client_depart LONGTEXT DEFAULT NULL, signature_deuxieme_chauffeur LONGTEXT DEFAULT NULL, signature_societe_depart LONGTEXT DEFAULT NULL, cree_au DATETIME NOT NULL COMMENT \'(DC2Type:datetime_immutable)\', edit_au DATETIME DEFAULT NULL COMMENT \'(DC2Type:datetime_immutable)\', UNIQUE INDEX UNIQ_EA93E384B83297E7 (reservation_id), PRIMARY KEY(id)) DEFAULT CHARACTER SET utf8mb4 COLLATE `utf8mb4_unicode_ci` ENGINE = InnoDB');
+        }
+        if (!$this->fkExists('vehicle_delivery', 'FK_EA93E384B83297E7')) {
+            $this->addSql('ALTER TABLE vehicle_delivery ADD CONSTRAINT FK_EA93E384B83297E7 FOREIGN KEY (reservation_id) REFERENCES reservation (id) ON DELETE CASCADE');
+        }
+
         // ── Block B: damage ──────────────────────────────────────────────────
         if (!$this->tableExists('damage')) {
             $this->addSql('CREATE TABLE damage (id INT AUTO_INCREMENT NOT NULL, vehicle_delivery_id INT DEFAULT NULL, return_inspection_id INT DEFAULT NULL, zone VARCHAR(30) NOT NULL, description LONGTEXT DEFAULT NULL, photo VARCHAR(255) DEFAULT NULL, severity VARCHAR(30) DEFAULT \'scratch\' NOT NULL, cree_au DATETIME NOT NULL COMMENT \'(DC2Type:datetime_immutable)\', INDEX IDX_11C8546C9C281457 (vehicle_delivery_id), INDEX IDX_11C8546C744A1FD4 (return_inspection_id), PRIMARY KEY(id)) DEFAULT CHARACTER SET utf8mb4 COLLATE `utf8mb4_unicode_ci` ENGINE = InnoDB');
@@ -57,14 +74,6 @@ final class Version20260611094801 extends AbstractMigration
         }
         if (!$this->fkExists('damage', 'FK_11C8546C744A1FD4')) {
             $this->addSql('ALTER TABLE damage ADD CONSTRAINT FK_11C8546C744A1FD4 FOREIGN KEY (return_inspection_id) REFERENCES vehicle_return_inspection (id) ON DELETE CASCADE');
-        }
-
-        // ── Block C: vehicle_delivery ────────────────────────────────────────
-        if (!$this->tableExists('vehicle_delivery')) {
-            $this->addSql('CREATE TABLE vehicle_delivery (id INT AUTO_INCREMENT NOT NULL, reservation_id INT NOT NULL, fuel_level_out VARCHAR(30) DEFAULT \'vide\' NOT NULL, mileage_out INT DEFAULT NULL, has_extincteur TINYINT(1) DEFAULT 0 NOT NULL, has_lavage TINYINT(1) DEFAULT 0 NOT NULL, has_plaque_depannage TINYINT(1) DEFAULT 0 NOT NULL, has_cric TINYINT(1) DEFAULT 0 NOT NULL, has_gilet TINYINT(1) DEFAULT 0 NOT NULL, has_roue_secours TINYINT(1) DEFAULT 0 NOT NULL, has_siege_bebe TINYINT(1) DEFAULT 0 NOT NULL, equipement_notes LONGTEXT DEFAULT NULL, delivery_notes LONGTEXT DEFAULT NULL, signature_client_depart LONGTEXT DEFAULT NULL, signature_deuxieme_chauffeur LONGTEXT DEFAULT NULL, signature_societe_depart LONGTEXT DEFAULT NULL, cree_au DATETIME NOT NULL COMMENT \'(DC2Type:datetime_immutable)\', edit_au DATETIME DEFAULT NULL COMMENT \'(DC2Type:datetime_immutable)\', UNIQUE INDEX UNIQ_EA93E384B83297E7 (reservation_id), PRIMARY KEY(id)) DEFAULT CHARACTER SET utf8mb4 COLLATE `utf8mb4_unicode_ci` ENGINE = InnoDB');
-        }
-        if (!$this->fkExists('vehicle_delivery', 'FK_EA93E384B83297E7')) {
-            $this->addSql('ALTER TABLE vehicle_delivery ADD CONSTRAINT FK_EA93E384B83297E7 FOREIGN KEY (reservation_id) REFERENCES reservation (id) ON DELETE CASCADE');
         }
 
         // ── Block D: client new columns ──────────────────────────────────────

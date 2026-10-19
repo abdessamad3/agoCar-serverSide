@@ -118,4 +118,55 @@ final class UtilisateurControllerTest extends ApiTestCase
 
         $this->assertSame(Response::HTTP_OK, $this->httpClient->getResponse()->getStatusCode());
     }
+
+    // Phase 12.2 Stage 3: a colleague's raw signature image must not leak to
+    // a bureau-visible co-worker who is neither its owner nor an admin --
+    // only the write side (saveSignature/deleteSignature) enforced that
+    // rule before this fix; show() returned the real image to anyone who
+    // could see the user record at all.
+
+    public function testStaffCannotSeeAColleaguesSignatureImage(): void
+    {
+        $bureau   = $this->makeBureau('Bureau A');
+        $staff    = $this->makeUser('staff@test.local', ['ROLE_STAFF'], $bureau);
+        $colleague = $this->makeUser('colleague@test.local', ['ROLE_MANAGER'], $bureau);
+        $colleague->setSignatureBlob('data:image/png;base64,AAAA');
+        $this->em->flush();
+
+        $this->httpClient->loginUser($staff);
+        $this->httpClient->request('GET', '/api/utilisateur/' . $colleague->getId());
+
+        $data = json_decode($this->httpClient->getResponse()->getContent(), true);
+        $this->assertTrue($data['hasSignature'], 'hasSignature must still be visible.');
+        $this->assertNull($data['signatureBlob'], 'The actual signature image must not leak to a non-owner, non-admin viewer.');
+    }
+
+    public function testUserCanSeeTheirOwnSignatureImage(): void
+    {
+        $bureau = $this->makeBureau('Bureau A');
+        $staff  = $this->makeUser('staff2@test.local', ['ROLE_STAFF'], $bureau);
+        $staff->setSignatureBlob('data:image/png;base64,BBBB');
+        $this->em->flush();
+
+        $this->httpClient->loginUser($staff);
+        $this->httpClient->request('GET', '/api/utilisateur/' . $staff->getId());
+
+        $data = json_decode($this->httpClient->getResponse()->getContent(), true);
+        $this->assertSame('data:image/png;base64,BBBB', $data['signatureBlob']);
+    }
+
+    public function testAdminCanSeeAnyonesSignatureImage(): void
+    {
+        $bureau = $this->makeBureau('Bureau A');
+        $admin  = $this->makeUser('admin2@test.local', ['ROLE_ADMIN'], null);
+        $staff  = $this->makeUser('staff3@test.local', ['ROLE_STAFF'], $bureau);
+        $staff->setSignatureBlob('data:image/png;base64,CCCC');
+        $this->em->flush();
+
+        $this->httpClient->loginUser($admin);
+        $this->httpClient->request('GET', '/api/utilisateur/' . $staff->getId());
+
+        $data = json_decode($this->httpClient->getResponse()->getContent(), true);
+        $this->assertSame('data:image/png;base64,CCCC', $data['signatureBlob']);
+    }
 }

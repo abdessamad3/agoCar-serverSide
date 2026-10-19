@@ -17,6 +17,18 @@ class VehicleCreditDocumentController extends AbstractController
 {
     use BureauAwareTrait;
 
+    /** Phase 12.5: confirmed the only Angular consumer is credit-detail.component.ts,
+     *  behind the /vehicle-financing/contracts/:id route which Angular already
+     *  gates to ROLE_ADMIN/ROLE_MANAGER. list() is left open (read access,
+     *  unaffected). Explicit OR-check, not a standalone ROLE_MANAGER attribute:
+     *  no role hierarchy exists. */
+    private function assertCanManage(): void
+    {
+        if (!$this->isGranted('ROLE_ADMIN') && !$this->isGranted('ROLE_MANAGER')) {
+            throw $this->createAccessDeniedException('Seuls les administrateurs et gestionnaires peuvent gérer les documents de crédit.');
+        }
+    }
+
     /** Bureau-locked staff/managers may only touch credit documents belonging to
      *  their own bureau. True admins (getEffectiveBureauId() === null) are unrestricted. */
     private function assertBureauAccess(VehicleCredit $credit): void
@@ -60,6 +72,7 @@ class VehicleCreditDocumentController extends AbstractController
         EntityManagerInterface $em,
         VehicleCreditRepository $creditRepo
     ): JsonResponse {
+        $this->assertCanManage();
         $credit = $creditRepo->find($request->request->get('vehicleCreditId') ?? 0);
         if (!$credit) return $this->json(['error' => 'Contrat introuvable'], 404);
         $this->assertBureauAccess($credit);
@@ -90,6 +103,7 @@ class VehicleCreditDocumentController extends AbstractController
     #[Route('/{id}', name: 'delete', methods: ['DELETE'])]
     public function delete(VehicleCreditDocument $doc, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertCanManage();
         if ($doc->getVehicleCredit()) $this->assertBureauAccess($doc->getVehicleCredit());
         $filePath = $this->getParameter('kernel.project_dir') . '/public' . $doc->getFilePath();
         if (file_exists($filePath)) unlink($filePath);

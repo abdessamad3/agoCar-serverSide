@@ -36,6 +36,10 @@ security:
     # Client portal — authenticated clients only (ROLE_CLIENT, no admin access)
     - { path: ^/api/client-portal, roles: ROLE_CLIENT }
 
-    # Admin/staff endpoints — ROLE_USER (auto-granted to all non-client staff)
+    # Admin/staff endpoints. NOTE: ROLE_USER is auto-granted by
+    # Utilisateur::getRoles() to EVERY non-client account, including ones
+    # created through the public /api/auth/register endpoint -- so it must
+    # NOT be used here as "is real staff". This list matches the staff-role
+    # whitelist already enforced in UtilisateurController::create()/update().
     - { path: ^/api/auth/me, roles: ROLE_USER }
-    - { path: ^/api,         roles: ROLE_USER } 
+    - { path: ^/api,         roles: [ROLE_STAFF, ROLE_MANAGER, ROLE_ADMIN, ROLE_ACCOUNTANT, ROLE_MECHANIC] }

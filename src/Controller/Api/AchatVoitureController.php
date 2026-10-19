@@ -23,6 +23,22 @@ class AchatVoitureController extends AbstractController
     use BureauAwareTrait;
     use PaginationTrait;
 
+    /** Phase 12.5: create() is deliberately NOT gated here -- confirmed (by
+     *  reading voiture-create.component.ts) that ROLE_STAFF creates purchase
+     *  records as a normal part of registering a new vehicle via /voiture/create
+     *  (a ROLE_STAFF-reachable route), not only through the dedicated
+     *  /achat-voiture admin page. update()/delete() ARE restricted below:
+     *  confirmed their only consumer is achat-list.component.ts, behind the
+     *  /achat-voiture route which Angular already gates to ROLE_ADMIN/ROLE_MANAGER.
+     *  Explicit OR-check, not a standalone ROLE_MANAGER attribute -- no role
+     *  hierarchy exists, so ROLE_ADMIN does not imply ROLE_MANAGER. */
+    private function assertCanManage(): void
+    {
+        if (!$this->isGranted('ROLE_ADMIN') && !$this->isGranted('ROLE_MANAGER')) {
+            throw $this->createAccessDeniedException('Seuls les administrateurs et gestionnaires peuvent modifier les achats.');
+        }
+    }
+
     /** Bureau-locked staff/managers may only touch purchases belonging to their own
      *  bureau. True admins (getEffectiveBureauId() === null) are unrestricted. */
     private function assertBureauAccess(AchatVoiture $achatVoiture): void
@@ -156,6 +172,7 @@ class AchatVoitureController extends AbstractController
         VoitureRepository $voitureRepo,
         FournisseurRepository $fournisseurRepo
     ): JsonResponse {
+        $this->assertCanManage();
         $this->assertBureauAccess($achatVoiture);
         $data = json_decode($request->getContent(), true);
 
@@ -191,6 +208,7 @@ class AchatVoitureController extends AbstractController
     #[Route('/{id}', name: 'delete', methods: ['DELETE'])]
     public function delete(AchatVoiture $achatVoiture, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertCanManage();
         $this->assertBureauAccess($achatVoiture);
         $achatVoiture->setDeletedAt(new \DateTimeImmutable());
         $em->flush();

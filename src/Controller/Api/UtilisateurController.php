@@ -17,6 +17,7 @@ use Symfony\Component\Security\Http\Attribute\IsGranted;
 use Symfony\Component\Validator\Validator\ValidatorInterface;
 
 #[Route('/api/utilisateur', name: 'app_api_utilisateur_')]
+#[IsGranted('ROLE_USER')]
 class UtilisateurController extends AbstractController
 {
     use BureauAwareTrait;
@@ -192,6 +193,18 @@ public function list(Request $request, UtilisateurRepository $repo): JsonRespons
     public function show(Utilisateur $utilisateur): JsonResponse
     {
         $this->assertBureauAccess($utilisateur);
+
+        // The raw signature image is only returned to its owner or an admin --
+        // same rule already enforced on the write side (saveSignature/
+        // deleteSignature below). Previously any bureau-visible co-worker could
+        // preview (not overwrite) another user's stored signature via this
+        // endpoint, including a manager's or admin's. hasSignature (a boolean)
+        // stays visible to everyone -- it reveals nothing but presence.
+        $currentUser   = $this->getUser();
+        $isAdmin       = $currentUser && in_array('ROLE_ADMIN', $currentUser->getRoles(), true);
+        $isSelf        = $currentUser && $currentUser->getId() === $utilisateur->getId();
+        $canSeeSignature = $isAdmin || $isSelf;
+
         return $this->json([
             'id'             => $utilisateur->getId(),
             'email'          => $utilisateur->getEmail(),
@@ -205,7 +218,7 @@ public function list(Request $request, UtilisateurRepository $repo): JsonRespons
             'bureau'         => $utilisateur->getBureau()?->getId(),
             'bureauNom'      => $utilisateur->getBureau()?->getNom(),
             'hasSignature'   => $utilisateur->getSignatureBlob() !== null,
-            'signatureBlob'  => $utilisateur->getSignatureBlob(),
+            'signatureBlob'  => $canSeeSignature ? $utilisateur->getSignatureBlob() : null,
             'creeAu'         => $utilisateur->getCreeAu()?->format('Y-m-d H:i:s'),
             'editAu'         => $utilisateur->getEditAu()?->format('Y-m-d H:i:s'),
         ]);

@@ -2,6 +2,7 @@
 
 namespace App\Repository;
 
+use App\Entity\Paiement;
 use App\Entity\Reservation;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
 use Doctrine\Persistence\ManagerRegistry;
@@ -49,11 +50,30 @@ class ReservationRepository extends ServiceEntityRepository
         return (int) $qb->getQuery()->getSingleScalarResult() > 0;
     }
 
+    /** DQL for "total refunded so far on reservation $alias" (sum of negative, non-deleted
+     *  Paiement rows) -- the same correlated subquery ClientController::applyHasDebtFilter()
+     *  already uses to decide inclusion. Reused here so the amount DISPLAYED matches the
+     *  amount used to decide WHO is included, and both match Reservation::getBalance(),
+     *  the authoritative formula ($montantPaye + refunded - $total; montantPaye is already
+     *  net of refunds -- see Reservation::getMontantRembourse()'s docblock -- so the refund
+     *  must be added back or a refund on an already-settled/overpaid reservation reads as
+     *  brand-new debt that was never real). */
+    private function refundSubDql(string $alias): string
+    {
+        return $this->getEntityManager()->createQueryBuilder()
+            ->select('COALESCE(SUM(ABS(pd.montant)), 0)')
+            ->from(Paiement::class, 'pd')
+            ->where("pd.reservation = $alias")
+            ->andWhere('pd.deletedAt IS NULL')
+            ->andWhere('pd.montant < 0')
+            ->getDQL();
+    }
+
     /** Sum of money still owed across all non-cancelled reservations for one client. */
     public function getClientOutstandingDebt(int $clientId): float
     {
         $rows = $this->createQueryBuilder('r')
-            ->select('r.total', 'r.montantPaye')
+            ->select('r.total', 'r.montantPaye', '(' . $this->refundSubDql('r') . ') AS refunded')
             ->where('r.client = :clientId')
             ->andWhere('r.deletedAt IS NULL')
             ->andWhere('r.reservationStatus NOT IN (:cancelled)')
@@ -75,7 +95,7 @@ class ReservationRepository extends ServiceEntityRepository
         }
 
         $qb = $this->createQueryBuilder('r')
-            ->select('IDENTITY(r.client) AS clientId', 'r.total', 'r.montantPaye')
+            ->select('IDENTITY(r.client) AS clientId', 'r.total', 'r.montantPaye', '(' . $this->refundSubDql('r') . ') AS refunded')
             ->where('r.deletedAt IS NULL')
             ->andWhere('r.reservationStatus NOT IN (:cancelled)')
             ->andWhere('r.client IN (:clientIds)')
@@ -100,11 +120,13 @@ class ReservationRepository extends ServiceEntityRepository
     /** Full financial picture for one client, for the Client Detail page. totalRevenue/
      *  outstandingDebt/overpayments are scoped to CLOSED reservations only (final totals);
      *  totalRentals/totalPaid count every non-cancelled reservation (money collected is real
-     *  even on a rental that's still in progress). */
+     *  even on a rental that's still in progress). debt/overpaid mirror
+     *  Reservation::getMontantRestant()/getMontantSurpaye() (refund added back before
+     *  comparing to total) instead of the raw paid-minus-total balance. */
     public function getClientFinancialSummary(int $clientId): array
     {
         $rows = $this->createQueryBuilder('r')
-            ->select('r.total', 'r.montantPaye', 'r.reservationStatus')
+            ->select('r.total', 'r.montantPaye', 'r.reservationStatus', '(' . $this->refundSubDql('r') . ') AS refunded')
             ->where('r.client = :clientId')
             ->andWhere('r.deletedAt IS NULL')
             ->andWhere('r.reservationStatus NOT IN (:cancelled)')
@@ -118,13 +140,14 @@ class ReservationRepository extends ServiceEntityRepository
         $overpaid     = 0.0;
 
         foreach ($rows as $row) {
-            $total = (float) $row['total'];
-            $paid  = (float) $row['montantPaye'];
+            $total    = (float) $row['total'];
+            $paid     = (float) $row['montantPaye'];
+            $refunded = (float) $row['refunded'];
             $totalPaid += $paid;
 
             if (in_array($row['reservationStatus'], Reservation::CLOSED_STATUSES, true)) {
                 $totalRevenue += $total;
-                $balance = $paid - $total;
+                $balance = $paid + $refunded - $total;
                 if ($balance < 0) $debt     += -$balance;
                 if ($balance > 0) $overpaid += $balance;
             }
@@ -192,11 +215,16 @@ class ReservationRepository extends ServiceEntityRepository
             ->getSingleScalarResult() > 0;
     }
 
+    /** Mirrors Reservation::getMontantRestant(): balance = montantPaye + refunded - total,
+     *  never the raw montantPaye - total (which would double-count a refund as new debt --
+     *  see refundSubDql()'s docblock). $row['refunded'] is 0 for any caller that didn't
+     *  select it (none do anymore, but this keeps the helper safe to reuse). */
     private static function sumOwed(array $rows): float
     {
         $debt = 0.0;
         foreach ($rows as $row) {
-            $balance = (float) $row['montantPaye'] - (float) $row['total'];
+            $refunded = (float) ($row['refunded'] ?? 0);
+            $balance = (float) $row['montantPaye'] + $refunded - (float) $row['total'];
             if ($balance < 0) {
                 $debt += -$balance;
             }

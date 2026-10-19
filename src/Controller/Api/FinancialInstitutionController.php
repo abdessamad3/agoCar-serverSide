@@ -16,6 +16,18 @@ class FinancialInstitutionController extends AbstractController
 {
     use PaginationTrait;
 
+    /** Phase 12.5: confirmed the only Angular consumers of this resource are
+     *  the /vehicle-financing/* pages, all gated ROLE_ADMIN/ROLE_MANAGER --
+     *  no other page or shared service references financial-institution.
+     *  Explicit OR-check, not a standalone ROLE_MANAGER attribute: no role
+     *  hierarchy exists, so ROLE_ADMIN does not imply ROLE_MANAGER. */
+    private function assertCanManage(): void
+    {
+        if (!$this->isGranted('ROLE_ADMIN') && !$this->isGranted('ROLE_MANAGER')) {
+            throw $this->createAccessDeniedException('Seuls les administrateurs et gestionnaires peuvent modifier les institutions financières.');
+        }
+    }
+
     private function serialize(FinancialInstitution $fi): array
     {
         return [
@@ -58,6 +70,7 @@ class FinancialInstitutionController extends AbstractController
     #[Route('', name: 'create', methods: ['POST'])]
     public function create(Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertCanManage();
         $data = json_decode($request->getContent(), true);
 
         $fi = new FinancialInstitution();
@@ -79,6 +92,7 @@ class FinancialInstitutionController extends AbstractController
     #[Route('/{id}', name: 'update', methods: ['PUT'])]
     public function update(FinancialInstitution $fi, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertCanManage();
         $data = json_decode($request->getContent(), true);
 
         if (isset($data['name']))          $fi->setName($data['name']);
@@ -98,6 +112,7 @@ class FinancialInstitutionController extends AbstractController
     #[Route('/{id}', name: 'delete', methods: ['DELETE'])]
     public function delete(FinancialInstitution $fi, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertCanManage();
         $fi->setStatus('inactive');
         $em->flush();
         return $this->json(['message' => 'Institution désactivée']);

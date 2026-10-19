@@ -15,6 +15,18 @@ class VehicleCreditReminderController extends AbstractController
 {
     use BureauAwareTrait;
 
+    /** Phase 12.5: confirmed no Angular page, shared service, or backend
+     *  Command currently calls markSent()/delete() at all. Restricting is
+     *  zero-risk; applied for consistency with the rest of the vehicle-credit-*
+     *  controller family. Explicit OR-check, not a standalone ROLE_MANAGER
+     *  attribute: no role hierarchy exists. */
+    private function assertCanManage(): void
+    {
+        if (!$this->isGranted('ROLE_ADMIN') && !$this->isGranted('ROLE_MANAGER')) {
+            throw $this->createAccessDeniedException('Seuls les administrateurs et gestionnaires peuvent gérer les rappels.');
+        }
+    }
+
     /** Bureau-locked staff/managers may only touch reminders belonging to their own
      *  bureau. True admins (getEffectiveBureauId() === null) are unrestricted. */
     private function assertBureauAccess(VehicleCreditReminder $reminder): void
@@ -82,6 +94,7 @@ class VehicleCreditReminderController extends AbstractController
     #[Route('/{id}/mark-sent', name: 'mark_sent', methods: ['PUT'])]
     public function markSent(VehicleCreditReminder $reminder, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertCanManage();
         $this->assertBureauAccess($reminder);
         $reminder->setStatus('sent');
         $reminder->setSentAt(new \DateTimeImmutable());
@@ -92,6 +105,7 @@ class VehicleCreditReminderController extends AbstractController
     #[Route('/{id}', name: 'delete', methods: ['DELETE'])]
     public function delete(VehicleCreditReminder $reminder, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertCanManage();
         $this->assertBureauAccess($reminder);
         $em->remove($reminder);
         $em->flush();

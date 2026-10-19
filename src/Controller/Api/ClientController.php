@@ -18,8 +18,10 @@ use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Annotation\Route;
+use Symfony\Component\Security\Http\Attribute\IsGranted;
 
 #[Route('/api/client', name: 'app_api_client_')]
+#[IsGranted('ROLE_USER')]
 class ClientController extends AbstractController
 {
     use BureauAwareTrait;
@@ -110,17 +112,7 @@ class ClientController extends AbstractController
         $qb = $em->createQueryBuilder()->select('c')->from(Client::class, 'c')->orderBy('c.id', 'DESC');
 
         if ($bureauId) {
-            // Visible to a bureau if it created the client OR the client has a reservation
-            // there — covers both "just added, no reservation yet" and "rented from us but
-            // was originally created by another bureau".
-            $subQb = $em->createQueryBuilder()
-                ->select('rsc.id')
-                ->from(Reservation::class, 'rs')
-                ->join('rs.voiture', 'vs')
-                ->join('rs.client', 'rsc')
-                ->where('vs.bureau = :bureauId');
-            $qb->where('c.bureau = :bureauId OR c.id IN (' . $subQb->getDQL() . ')')
-               ->setParameter('bureauId', $bureauId);
+            $this->applyBureauVisibility($qb, $em, $bureauId);
         }
         if ($search) {
             $qb->andWhere('c.nom LIKE :s OR c.prenom LIKE :s OR c.cin LIKE :s OR c.telephone LIKE :s')
@@ -130,27 +122,7 @@ class ClientController extends AbstractController
             $qb->andWhere('c.nationalite = :nat')->setParameter('nat', $nationalite);
         }
         if ($hasDebt) {
-            // rd.total never changes when a client is refunded, only montantPaye does, so
-            // comparing those two alone would flag a client as having debt again right
-            // after being refunded on an already-settled reservation -- add the refund
-            // back first (mirrors Reservation::getBalance()).
-            $refundSub = $em->createQueryBuilder()
-                ->select('COALESCE(SUM(ABS(pd.montant)), 0)')
-                ->from(Paiement::class, 'pd')
-                ->where('pd.reservation = rd')
-                ->andWhere('pd.deletedAt IS NULL')
-                ->andWhere('pd.montant < 0')
-                ->getDQL();
-
-            $sub = $em->createQueryBuilder()
-                ->select('1')->from(Reservation::class, 'rd')
-                ->where('rd.client = c')
-                ->andWhere('rd.deletedAt IS NULL')
-                ->andWhere('rd.reservationStatus NOT IN (:cancelStatuses)')
-                ->andWhere("(rd.total - COALESCE(rd.montantPaye, 0)) > ($refundSub)")
-                ->getDQL();
-            $qb->andWhere($qb->expr()->exists($sub))
-               ->setParameter('cancelStatuses', ['cancelled', 'annulee', 'annule']);
+            $this->applyHasDebtFilter($qb, $em);
         }
         if ($hasActiveReservation) {
             $sub = $em->createQueryBuilder()
@@ -180,7 +152,116 @@ class ClientController extends AbstractController
         ]);
     }
 
-    #[Route('/{id}', name: 'show', methods: ['GET'])]
+    /** Visible to a bureau if it created the client OR the client has a reservation there --
+     *  covers both "just added, no reservation yet" and "rented from us but was originally
+     *  created by another bureau". Shared by list() and debtors(). */
+    private function applyBureauVisibility(\Doctrine\ORM\QueryBuilder $qb, EntityManagerInterface $em, int $bureauId): void
+    {
+        $subQb = $em->createQueryBuilder()
+            ->select('rsc.id')
+            ->from(Reservation::class, 'rs')
+            ->join('rs.voiture', 'vs')
+            ->join('rs.client', 'rsc')
+            ->where('vs.bureau = :bureauId');
+        $qb->andWhere('c.bureau = :bureauId OR c.id IN (' . $subQb->getDQL() . ')')
+           ->setParameter('bureauId', $bureauId);
+    }
+
+    /** rd.total never changes when a client is refunded, only montantPaye does, so comparing
+     *  those two alone would flag a client as having debt again right after being refunded on
+     *  an already-settled reservation -- add the refund back first (mirrors
+     *  Reservation::getBalance()). Shared by list() and debtors(). */
+    private function applyHasDebtFilter(\Doctrine\ORM\QueryBuilder $qb, EntityManagerInterface $em): void
+    {
+        $refundSub = $em->createQueryBuilder()
+            ->select('COALESCE(SUM(ABS(pd.montant)), 0)')
+            ->from(Paiement::class, 'pd')
+            ->where('pd.reservation = rd')
+            ->andWhere('pd.deletedAt IS NULL')
+            ->andWhere('pd.montant < 0')
+            ->getDQL();
+
+        $sub = $em->createQueryBuilder()
+            ->select('1')->from(Reservation::class, 'rd')
+            ->where('rd.client = c')
+            ->andWhere('rd.deletedAt IS NULL')
+            ->andWhere('rd.reservationStatus NOT IN (:cancelStatuses)')
+            ->andWhere("(rd.total - COALESCE(rd.montantPaye, 0)) > ($refundSub)")
+            ->getDQL();
+        $qb->andWhere($qb->expr()->exists($sub))
+           ->setParameter('cancelStatuses', ['cancelled', 'annulee', 'annule']);
+    }
+
+    /** Server-side-paginated, debt-ranked view for the admin "customer debtors" page.
+     *  Unlike list()?hasDebt=true (which paginates clients first, in c.id order, and only
+     *  then looks up each page's debt), this ranks ALL matching debtors by amount owed
+     *  BEFORE paginating, so "highest debt first" and the grand-total/high-risk counters
+     *  stay correct across pages -- without ever loading every client or every reservation
+     *  into memory. Only (a) id/total/montantPaye rows for clients who already have a
+     *  genuine balance, and (b) full Client rows for the one requested page, are fetched. */
+    #[Route('/debtors', name: 'debtors', methods: ['GET'])]
+    public function debtors(Request $request, EntityManagerInterface $em): JsonResponse
+    {
+        $bureauId = $this->getEffectiveBureauId();
+        $page     = $this->getPageParam($request);
+        $search   = trim((string) $request->query->get('search', ''));
+
+        $idQb = $em->createQueryBuilder()->select('c.id')->from(Client::class, 'c');
+        if ($bureauId) {
+            $this->applyBureauVisibility($idQb, $em, $bureauId);
+        }
+        if ($search) {
+            $idQb->andWhere('c.nom LIKE :s OR c.prenom LIKE :s OR c.cin LIKE :s OR c.telephone LIKE :s')
+                 ->setParameter('s', "%$search%");
+        }
+        $this->applyHasDebtFilter($idQb, $em);
+
+        $clientIds = array_column($idQb->getQuery()->getScalarResult(), 'id');
+        $debts     = $this->reservationRepo->getOutstandingDebtForClients($clientIds);
+
+        // Rank by debt descending (ties broken by client id descending, i.e. newest first --
+        // matches list()'s default order) BEFORE paginating, so the ranking and the
+        // grand-total/high-risk counters below are correct across the whole matching set,
+        // not just whichever page happens to load.
+        $ranked = [];
+        foreach ($clientIds as $id) {
+            if (($debts[$id] ?? 0) > 0) {
+                $ranked[] = ['id' => $id, 'debt' => $debts[$id]];
+            }
+        }
+        usort($ranked, fn($a, $b) => ($b['debt'] <=> $a['debt']) ?: ($b['id'] <=> $a['id']));
+
+        $total         = count($ranked);
+        $grandTotal    = array_sum(array_column($ranked, 'debt'));
+        $highRiskCount = count(array_filter($ranked, fn($r) => $r['debt'] >= 5000)); // mirrors debt.utils.ts's 'high' tier
+
+        $pageRows = array_slice($ranked, ($page - 1) * self::PER_PAGE, self::PER_PAGE);
+        $pageIds  = array_column($pageRows, 'id');
+
+        $byId = [];
+        if ($pageIds) {
+            foreach ($em->getRepository(Client::class)->findBy(['id' => $pageIds]) as $c) {
+                $byId[$c->getId()] = $c;
+            }
+        }
+
+        $data = [];
+        foreach ($pageRows as $row) {
+            if (isset($byId[$row['id']])) {
+                $data[] = $this->serializeClient($byId[$row['id']], $row['debt']);
+            }
+        }
+
+        return $this->json([
+            'data' => $data,
+            'meta' => array_merge($this->paginateMeta($total, $page), [
+                'grandTotal'    => $grandTotal,
+                'highRiskCount' => $highRiskCount,
+            ]),
+        ]);
+    }
+
+    #[Route('/{id}', name: 'show', methods: ['GET'], requirements: ['id' => '\d+'])]
     public function show(Client $client): JsonResponse
     {
         $this->assertBureauAccess($client);

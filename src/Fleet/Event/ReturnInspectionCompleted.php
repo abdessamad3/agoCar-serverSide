@@ -29,6 +29,7 @@ readonly class ReturnInspectionCompleted implements FleetEvent
     public function getEquipmentCharge(): float { return $this->equipmentCharge; }
     public function getCondition(): string { return $this->condition; }
     public function hasDamage(): bool { return $this->condition !== 'clean'; }
+    public function hasMajorDamage(): bool { return $this->condition === 'major_damage'; }
     public function hasDamageCharges(): bool { return $this->damageCharge > 0; }
     public function getTotalAdditionalCharges(): float
     {

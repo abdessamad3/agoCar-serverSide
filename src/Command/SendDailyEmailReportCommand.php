@@ -46,7 +46,6 @@ class SendDailyEmailReportCommand extends Command
         private EntityManagerInterface $em,
         private string                 $senderEmail,
         private string                 $recipientEmail,
-        private string                 $bccEmails = '',
     ) {
         parent::__construct();
     }
@@ -79,44 +78,82 @@ class SendDailyEmailReportCommand extends Command
             return Command::SUCCESS;
         }
 
-        $subject = sprintf('AGOCAR Daily Report — %d alert(s) — %s', $totalAlerts, date('d/m/Y'));
-        $html    = $this->buildHtml($compliance, $oil, $credits, $vcInstallments, $totalAlerts);
-
-        $log = new EmailLog();
-        $log->setRecipientEmail($this->recipientEmail);
-        $log->setSubject($subject);
-        $log->setTotalAlerts($totalAlerts);
-        $log->setComplianceCount(count($compliance));
-        $log->setOilCount(count($oil));
-        $log->setCreditCount(count($credits) + count($vcInstallments));
-        $log->setTriggeredBy($triggeredBy);
-
-        try {
-            $email = (new Email())
-                ->from($this->senderEmail)
-                ->to($this->recipientEmail)
-                ->subject($subject)
-                ->html($html);
-
-            if ($this->bccEmails !== '') {
-                $addresses = array_filter(array_map('trim', explode(',', $this->bccEmails)));
-                if ($addresses) $email->bcc(...$addresses);
-            }
-
-            $this->mailer->send($email);
-
-            $log->setStatus('sent');
-            $io->success(sprintf('Daily report sent to %s — %d alert(s).', $this->recipientEmail, $totalAlerts));
-        } catch (\Throwable $e) {
-            $log->setStatus('failed');
-            $log->setErrorMessage($e->getMessage());
-            $io->error('Failed to send email: ' . $e->getMessage());
-        } finally {
-            $this->em->persist($log);
-            $this->em->flush();
+        // Managers go in To (visible, primary), staff in Cc (visible, but not
+        // primary), admins always in Bcc (they must always get the report,
+        // but must never appear as a visible recipient to managers/staff).
+        // Recipients are additionally grouped by their own preferred language
+        // (synced from the UI language toggle) -- one email per language
+        // present, each recipient only seeing the group they're actually in.
+        $byLang = [];
+        foreach ($this->utilisateurRepo->findBy(['actif' => true]) as $u) {
+            if (!$u->getEmail()) continue;
+            $lang = in_array($u->getLangue(), ['en', 'fr', 'ar'], true) ? $u->getLangue() : 'fr';
+            $byLang[$lang] ??= ['managers' => [], 'staff' => [], 'admins' => []];
+            $roles = $u->getRoles();
+            if (in_array('ROLE_ADMIN', $roles, true))        $byLang[$lang]['admins'][]   = $u->getEmail();
+            elseif (in_array('ROLE_MANAGER', $roles, true))  $byLang[$lang]['managers'][] = $u->getEmail();
+            elseif (in_array('ROLE_STAFF', $roles, true))    $byLang[$lang]['staff'][]    = $u->getEmail();
+        }
+        if (!$byLang) {
+            // Nobody active with an email at all -- fall back to the single
+            // configured recipient so the report is still deliverable.
+            $byLang['fr'] = ['managers' => [$this->recipientEmail], 'staff' => [], 'admins' => []];
         }
 
-        return Command::SUCCESS;
+        $sentCount = 0;
+        $failed    = false;
+        foreach ($byLang as $lang => $buckets) {
+            $managers = array_values(array_unique($buckets['managers']));
+            $staff    = array_values(array_unique(array_diff($buckets['staff'], $managers)));
+            $bcc      = array_values(array_unique(array_diff($buckets['admins'], $managers, $staff)));
+
+            // Edge case: no managers in this language group -- fall back to
+            // the configured recipient so the group's alerts still go out.
+            $to = $managers ?: [$this->recipientEmail];
+
+            $t       = $this->labels($lang);
+            $subject = sprintf($t['emailSubject'], $totalAlerts, date('d/m/Y'));
+            $html    = $this->buildHtml($compliance, $oil, $credits, $vcInstallments, $totalAlerts, $lang);
+
+            $log = new EmailLog();
+            $log->setRecipientEmail(implode(', ', $to));
+            $log->setSubject($subject);
+            $log->setTotalAlerts($totalAlerts);
+            $log->setComplianceCount(count($compliance));
+            $log->setOilCount(count($oil));
+            $log->setCreditCount(count($credits) + count($vcInstallments));
+            $log->setTriggeredBy($triggeredBy);
+
+            try {
+                $email = (new Email())
+                    ->from($this->senderEmail)
+                    ->to(...$to)
+                    ->subject($subject)
+                    ->html($html);
+
+                if ($staff) $email->cc(...$staff);
+                if ($bcc)   $email->bcc(...$bcc);
+
+                $this->mailer->send($email);
+
+                $log->setStatus('sent');
+                $sentCount++;
+                $io->success(sprintf(
+                    '[%s] Daily report sent to %s (cc: %s, bcc: %s) — %d alert(s).',
+                    $lang, implode(', ', $to), implode(', ', $staff), implode(', ', $bcc), $totalAlerts
+                ));
+            } catch (\Throwable $e) {
+                $failed = true;
+                $log->setStatus('failed');
+                $log->setErrorMessage($e->getMessage());
+                $io->error("[$lang] Failed to send email: " . $e->getMessage());
+            } finally {
+                $this->em->persist($log);
+            }
+        }
+        $this->em->flush();
+
+        return ($sentCount > 0 || !$failed) ? Command::SUCCESS : Command::FAILURE;
     }
 
     // ── VehicleCredit in-app notifications ────────────────────────────────────
@@ -320,13 +357,9 @@ class SendDailyEmailReportCommand extends Command
                     . ($voiture->getImmatriculation() ? ' (' . $voiture->getImmatriculation() . ')' : '');
             $status = $this->complianceService->getComplianceStatus($voiture);
 
-            $docLabels = [
-                'assurance' => 'Assurance',
-                'vignette'  => 'Vignette',
-                'visite'    => 'Visite technique',
-            ];
-
-            foreach ($docLabels as $key => $docLabel) {
+            // 'doc' stores the stable key ('assurance'/'vignette'/'visite'), not a
+            // display label -- buildHtml() translates it per recipient language.
+            foreach (['assurance', 'vignette', 'visite'] as $key) {
                 $info = $status[$key];
                 $days = $info['daysRemaining'];
                 // WARNING/CRITICAL/EXPIRED always alert; VALID only alerts within the
@@ -336,7 +369,7 @@ class SendDailyEmailReportCommand extends Command
                 if (in_array($info['status'], [ComplianceService::WARNING, ComplianceService::CRITICAL, ComplianceService::EXPIRED], true) || $inAdvanceWindow) {
                     $alerts[] = [
                         'car'     => $label,
-                        'doc'     => $docLabel,
+                        'doc'     => $key,
                         'status'  => $info['status'],
                         'days'    => $days,
                         'expires' => $info['expiresAt'],
@@ -448,29 +481,104 @@ class SendDailyEmailReportCommand extends Command
 
     // ── HTML builder ──────────────────────────────────────────────────────────
 
-    private function buildHtml(array $compliance, array $oil, array $credits, array $vcInstallments, int $total): string
+    /**
+     * All display strings for the daily report, per language. Keep keys
+     * identical across all three so buildHtml() never has to branch on $lang
+     * except for direction/alignment.
+     */
+    private function labels(string $lang): array
     {
+        $all = [
+            'en' => [
+                'htmlLang' => 'en', 'dir' => 'ltr', 'align' => 'left',
+                'title' => '🚗 AGOCAR — Daily Alert Report',
+                'emailSubject' => 'AGOCAR Daily Report — %d alert(s) — %s',
+                'generatedOn' => 'Generated on %s at 10:00 AM',
+                'totalAlerts' => 'Total alerts', 'compliance' => 'Compliance', 'oilChanges' => 'Oil changes',
+                'creditsOld' => 'Credits (old)', 'creditInstallments' => 'Credit installments',
+                'sectionCompliance' => '🛡️ Document Compliance', 'sectionOil' => '🛢️ Oil Changes',
+                'sectionCredits' => '💳 Credit Payments (legacy)', 'sectionVc' => '📅 Vehicle Credit Installments (≤ 5 days)',
+                'vehicle' => 'Vehicle', 'document' => 'Document', 'status' => 'Status', 'expiresDays' => 'Expires / Days',
+                'remainingKm' => 'Remaining km', 'nextServiceAt' => 'Next service at',
+                'vehicleCredit' => 'Vehicle / Credit', 'dueDate' => 'Due date', 'amount' => 'Amount', 'amountDue' => 'Amount due',
+                'badgeExpired' => 'EXPIRED', 'badgeCritical' => 'CRITICAL', 'badgeAdvance' => 'ADVANCE NOTICE',
+                'badgeWarning' => 'WARNING', 'badgeOverdue' => 'OVERDUE', 'badgeDueSoon' => 'DUE SOON', 'badgeToday' => 'TODAY',
+                'noCompliance' => '✅ No compliance issues.', 'noOil' => '✅ No oil change alerts.',
+                'noCredits' => '✅ No legacy credit alerts.', 'noVc' => '✅ No upcoming credit installments in the next 5 days.',
+                'daysOverdue' => '%dd overdue', 'dueToday' => 'today', 'dueIn' => 'in %dd', 'daysSuffix' => 'd',
+                'docAssurance' => 'Insurance', 'docVignette' => 'Road tax (vignette)', 'docVisite' => 'Technical inspection',
+                'footer' => 'This report is sent automatically every day at 10:00 AM by AGOCAR.<br>Do not reply to this email.',
+            ],
+            'fr' => [
+                'htmlLang' => 'fr', 'dir' => 'ltr', 'align' => 'left',
+                'title' => '🚗 AGOCAR — Rapport d\'alertes quotidien',
+                'emailSubject' => 'Rapport quotidien AGOCAR — %d alerte(s) — %s',
+                'generatedOn' => 'Généré le %s à 10h00',
+                'totalAlerts' => 'Total des alertes', 'compliance' => 'Conformité', 'oilChanges' => 'Vidanges',
+                'creditsOld' => 'Crédits (ancien)', 'creditInstallments' => 'Échéances de crédit',
+                'sectionCompliance' => '🛡️ Conformité des documents', 'sectionOil' => '🛢️ Vidanges',
+                'sectionCredits' => '💳 Paiements de crédit (ancien)', 'sectionVc' => '📅 Échéances de crédit véhicule (≤ 5 jours)',
+                'vehicle' => 'Véhicule', 'document' => 'Document', 'status' => 'Statut', 'expiresDays' => 'Expire / Jours',
+                'remainingKm' => 'Km restants', 'nextServiceAt' => 'Prochaine vidange à',
+                'vehicleCredit' => 'Véhicule / Crédit', 'dueDate' => 'Date d\'échéance', 'amount' => 'Montant', 'amountDue' => 'Montant dû',
+                'badgeExpired' => 'EXPIRÉ', 'badgeCritical' => 'CRITIQUE', 'badgeAdvance' => 'PRÉAVIS',
+                'badgeWarning' => 'ATTENTION', 'badgeOverdue' => 'EN RETARD', 'badgeDueSoon' => 'BIENTÔT DÛ', 'badgeToday' => 'AUJOURD\'HUI',
+                'noCompliance' => '✅ Aucun problème de conformité.', 'noOil' => '✅ Aucune alerte de vidange.',
+                'noCredits' => '✅ Aucune alerte de crédit (ancien).', 'noVc' => '✅ Aucune échéance de crédit véhicule dans les 5 prochains jours.',
+                'daysOverdue' => '%dj de retard', 'dueToday' => 'aujourd\'hui', 'dueIn' => 'dans %dj', 'daysSuffix' => 'j',
+                'docAssurance' => 'Assurance', 'docVignette' => 'Vignette', 'docVisite' => 'Visite technique',
+                'footer' => 'Ce rapport est envoyé automatiquement chaque jour à 10h00 par AGOCAR.<br>Ne pas répondre à cet email.',
+            ],
+            'ar' => [
+                'htmlLang' => 'ar', 'dir' => 'rtl', 'align' => 'right',
+                'title' => '🚗 AGOCAR — تقرير التنبيهات اليومي',
+                'emailSubject' => 'تقرير AGOCAR اليومي — %d تنبيه(ات) — %s',
+                'generatedOn' => 'تم الإنشاء في %s الساعة 10:00 صباحاً',
+                'totalAlerts' => 'إجمالي التنبيهات', 'compliance' => 'الامتثال', 'oilChanges' => 'تغيير الزيت',
+                'creditsOld' => 'القروض (قديم)', 'creditInstallments' => 'أقساط القروض',
+                'sectionCompliance' => '🛡️ امتثال الوثائق', 'sectionOil' => '🛢️ تغيير الزيت',
+                'sectionCredits' => '💳 مدفوعات القروض (قديم)', 'sectionVc' => '📅 أقساط قروض السيارات (≤ 5 أيام)',
+                'vehicle' => 'السيارة', 'document' => 'الوثيقة', 'status' => 'الحالة', 'expiresDays' => 'تنتهي / أيام',
+                'remainingKm' => 'الكيلومترات المتبقية', 'nextServiceAt' => 'الصيانة القادمة عند',
+                'vehicleCredit' => 'السيارة / القرض', 'dueDate' => 'تاريخ الاستحقاق', 'amount' => 'المبلغ', 'amountDue' => 'المبلغ المستحق',
+                'badgeExpired' => 'منتهي الصلاحية', 'badgeCritical' => 'حرج', 'badgeAdvance' => 'إشعار مسبق',
+                'badgeWarning' => 'تحذير', 'badgeOverdue' => 'متأخر', 'badgeDueSoon' => 'قريب الاستحقاق', 'badgeToday' => 'اليوم',
+                'noCompliance' => '✅ لا توجد مشاكل في الامتثال.', 'noOil' => '✅ لا توجد تنبيهات لتغيير الزيت.',
+                'noCredits' => '✅ لا توجد تنبيهات قروض قديمة.', 'noVc' => '✅ لا توجد أقساط قروض مستحقة خلال 5 أيام القادمة.',
+                'daysOverdue' => 'متأخر %d يوم', 'dueToday' => 'اليوم', 'dueIn' => 'خلال %d يوم', 'daysSuffix' => 'يوم',
+                'docAssurance' => 'التأمين', 'docVignette' => 'الضريبة السنوية', 'docVisite' => 'الفحص التقني',
+                'footer' => 'يتم إرسال هذا التقرير تلقائياً كل يوم الساعة 10:00 صباحاً بواسطة AGOCAR.<br>الرجاء عدم الرد على هذا البريد الإلكتروني.',
+            ],
+        ];
+
+        return $all[$lang] ?? $all['fr'];
+    }
+
+    private function buildHtml(array $compliance, array $oil, array $credits, array $vcInstallments, int $total, string $lang = 'fr'): string
+    {
+        $t    = $this->labels($lang);
         $date = date('d/m/Y');
+        $docLabelKeys = ['assurance' => 'docAssurance', 'vignette' => 'docVignette', 'visite' => 'docVisite'];
 
         $html = <<<HTML
         <!DOCTYPE html>
-        <html lang="fr">
+        <html lang="{$t['htmlLang']}" dir="{$t['dir']}">
         <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <style>
-          body { font-family: Arial, sans-serif; background: #f4f4f4; margin: 0; padding: 20px; color: #333; }
+          body { font-family: Arial, sans-serif; background: #f4f4f4; margin: 0; padding: 20px; color: #333; direction: {$t['dir']}; }
           .wrapper { max-width: 640px; margin: 0 auto; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-          .header { background: #1a365d; color: #fff; padding: 24px 28px; }
+          .header { background: #1a365d; color: #fff; padding: 24px 28px; text-align: {$t['align']}; }
           .header h1 { margin: 0; font-size: 22px; }
           .header p { margin: 4px 0 0; font-size: 13px; opacity: 0.85; }
-          .summary-bar { background: #2b6cb0; color: #fff; padding: 10px 28px; font-size: 13px; }
+          .summary-bar { background: #2b6cb0; color: #fff; padding: 10px 28px; font-size: 13px; text-align: {$t['align']}; }
           .content { padding: 24px 28px; }
-          .section-title { font-size: 15px; font-weight: bold; margin: 20px 0 10px; padding-bottom: 6px; border-bottom: 2px solid #e2e8f0; color: #2d3748; }
+          .section-title { font-size: 15px; font-weight: bold; margin: 20px 0 10px; padding-bottom: 6px; border-bottom: 2px solid #e2e8f0; color: #2d3748; text-align: {$t['align']}; }
           .section-title:first-child { margin-top: 0; }
           table { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 4px; table-layout: fixed; }
-          th { background: #edf2f7; color: #4a5568; text-align: left; padding: 8px 10px; font-weight: 600; word-break: break-word; }
-          td { padding: 8px 10px; border-bottom: 1px solid #f0f0f0; vertical-align: top; word-break: break-word; }
+          th { background: #edf2f7; color: #4a5568; text-align: {$t['align']}; padding: 8px 10px; font-weight: 600; word-break: break-word; }
+          td { padding: 8px 10px; border-bottom: 1px solid #f0f0f0; vertical-align: top; word-break: break-word; text-align: {$t['align']}; }
           tr:last-child td { border-bottom: none; }
           .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 700; white-space: nowrap; }
           .badge-expired  { background: #fff5f5; color: #c53030; border: 1px solid #fc8181; }
@@ -480,7 +588,7 @@ class SendDailyEmailReportCommand extends Command
           .badge-overdue  { background: #fff5f5; color: #c53030; border: 1px solid #fc8181; }
           .badge-duesoon  { background: #fffaf0; color: #c05621; border: 1px solid #f6ad55; }
           .footer { background: #f7fafc; padding: 16px 28px; font-size: 11px; color: #a0aec0; text-align: center; border-top: 1px solid #e2e8f0; }
-          .no-issues { color: #718096; font-size: 13px; font-style: italic; padding: 6px 0; }
+          .no-issues { color: #718096; font-size: 13px; font-style: italic; padding: 6px 0; text-align: {$t['align']}; }
           @media (max-width: 480px) {
             body { padding: 8px; }
             .content { padding: 14px 12px; }
@@ -496,96 +604,96 @@ class SendDailyEmailReportCommand extends Command
         <body>
         <div class="wrapper">
           <div class="header">
-            <h1>🚗 AGOCAR — Daily Alert Report</h1>
-            <p>Generated on $date at 10:00 AM</p>
+            <h1>{$t['title']}</h1>
+            <p>{$this->fmt($t['generatedOn'], $date)}</p>
           </div>
           <div class="summary-bar">
-            Total alerts: <strong>$total</strong>
-            &nbsp;·&nbsp; Compliance: <strong>{$this->count($compliance)}</strong>
-            &nbsp;·&nbsp; Oil changes: <strong>{$this->count($oil)}</strong>
-            &nbsp;·&nbsp; Credits (old): <strong>{$this->count($credits)}</strong>
-            &nbsp;·&nbsp; Credit installments: <strong>{$this->count($vcInstallments)}</strong>
+            {$t['totalAlerts']}: <strong>$total</strong>
+            &nbsp;·&nbsp; {$t['compliance']}: <strong>{$this->count($compliance)}</strong>
+            &nbsp;·&nbsp; {$t['oilChanges']}: <strong>{$this->count($oil)}</strong>
+            &nbsp;·&nbsp; {$t['creditsOld']}: <strong>{$this->count($credits)}</strong>
+            &nbsp;·&nbsp; {$t['creditInstallments']}: <strong>{$this->count($vcInstallments)}</strong>
           </div>
           <div class="content">
         HTML;
 
         // ── Compliance section
-        $html .= '<div class="section-title">🛡️ Document Compliance</div>';
+        $html .= "<div class=\"section-title\">{$t['sectionCompliance']}</div>";
         if ($compliance) {
-            $html .= '<table><tr><th>Vehicle</th><th>Document</th><th>Status</th><th>Expires / Days</th></tr>';
+            $html .= "<table><tr><th>{$t['vehicle']}</th><th>{$t['document']}</th><th>{$t['status']}</th><th>{$t['expiresDays']}</th></tr>";
             foreach ($compliance as $a) {
                 $badge = match($a['status']) {
-                    ComplianceService::EXPIRED  => '<span class="badge badge-expired">EXPIRED</span>',
-                    ComplianceService::CRITICAL => '<span class="badge badge-critical">CRITICAL</span>',
-                    ComplianceService::VALID    => '<span class="badge badge-advance">ADVANCE NOTICE</span>',
-                    default                     => '<span class="badge badge-warning">WARNING</span>',
+                    ComplianceService::EXPIRED  => "<span class=\"badge badge-expired\">{$t['badgeExpired']}</span>",
+                    ComplianceService::CRITICAL => "<span class=\"badge badge-critical\">{$t['badgeCritical']}</span>",
+                    ComplianceService::VALID    => "<span class=\"badge badge-advance\">{$t['badgeAdvance']}</span>",
+                    default                     => "<span class=\"badge badge-warning\">{$t['badgeWarning']}</span>",
                 };
-                $days   = $a['days'] !== null ? htmlspecialchars((string) $a['days']) . 'd' : '—';
+                $days   = $a['days'] !== null ? htmlspecialchars((string) $a['days']) . $t['daysSuffix'] : '—';
                 $exp    = $a['expires'] ?? '—';
-                $html .= "<tr><td>{$a['car']}</td><td>{$a['doc']}</td><td>$badge</td><td>$exp ($days)</td></tr>";
+                $doc    = $t[$docLabelKeys[$a['doc']] ?? ''] ?? $a['doc'];
+                $html .= "<tr><td>{$a['car']}</td><td>$doc</td><td>$badge</td><td>$exp ($days)</td></tr>";
             }
             $html .= '</table>';
         } else {
-            $html .= '<p class="no-issues">✅ No compliance issues.</p>';
+            $html .= "<p class=\"no-issues\">{$t['noCompliance']}</p>";
         }
 
         // ── Oil section
-        $html .= '<div class="section-title">🛢️ Oil Changes</div>';
+        $html .= "<div class=\"section-title\">{$t['sectionOil']}</div>";
         if ($oil) {
-            $html .= '<table><tr><th>Vehicle</th><th>Status</th><th>Remaining km</th><th>Next service at</th></tr>';
+            $html .= "<table><tr><th>{$t['vehicle']}</th><th>{$t['status']}</th><th>{$t['remainingKm']}</th><th>{$t['nextServiceAt']}</th></tr>";
             foreach ($oil as $a) {
                 $badge = $a['status'] === OilChangeService::OVERDUE
-                    ? '<span class="badge badge-overdue">OVERDUE</span>'
-                    : '<span class="badge badge-duesoon">DUE SOON</span>';
+                    ? "<span class=\"badge badge-overdue\">{$t['badgeOverdue']}</span>"
+                    : "<span class=\"badge badge-duesoon\">{$t['badgeDueSoon']}</span>";
                 $rem    = htmlspecialchars((string) $a['remaining']);
                 $nextAt = htmlspecialchars((string) ($a['nextAt'] ?? '—'));
                 $html .= "<tr><td>{$a['car']}</td><td>$badge</td><td>{$rem} km</td><td>{$nextAt} km</td></tr>";
             }
             $html .= '</table>';
         } else {
-            $html .= '<p class="no-issues">✅ No oil change alerts.</p>';
+            $html .= "<p class=\"no-issues\">{$t['noOil']}</p>";
         }
 
         // ── Legacy credits section
-        $html .= '<div class="section-title">💳 Credit Payments (legacy)</div>';
+        $html .= "<div class=\"section-title\">{$t['sectionCredits']}</div>";
         if ($credits) {
-            $html .= '<table><tr><th>Vehicle / Credit</th><th>Status</th><th>Due date</th><th>Amount</th></tr>';
+            $html .= "<table><tr><th>{$t['vehicleCredit']}</th><th>{$t['status']}</th><th>{$t['dueDate']}</th><th>{$t['amount']}</th></tr>";
             foreach ($credits as $a) {
                 $badge = $a['status'] === 'OVERDUE'
-                    ? '<span class="badge badge-overdue">OVERDUE</span>'
-                    : '<span class="badge badge-duesoon">DUE SOON</span>';
+                    ? "<span class=\"badge badge-overdue\">{$t['badgeOverdue']}</span>"
+                    : "<span class=\"badge badge-duesoon\">{$t['badgeDueSoon']}</span>";
                 $html .= "<tr><td>{$a['car']}</td><td>$badge</td><td>{$a['dueDate']}</td><td>{$a['amount']} MAD</td></tr>";
             }
             $html .= '</table>';
         } else {
-            $html .= '<p class="no-issues">✅ No legacy credit alerts.</p>';
+            $html .= "<p class=\"no-issues\">{$t['noCredits']}</p>";
         }
 
         // ── VehicleCredit installments section
-        $html .= '<div class="section-title">📅 Vehicle Credit Installments (≤ 5 days)</div>';
+        $html .= "<div class=\"section-title\">{$t['sectionVc']}</div>";
         if ($vcInstallments) {
-            $html .= '<table><tr><th>Vehicle</th><th>#</th><th>Status</th><th>Due date</th><th>Amount due</th></tr>';
+            $html .= "<table><tr><th>{$t['vehicle']}</th><th>#</th><th>{$t['status']}</th><th>{$t['dueDate']}</th><th>{$t['amountDue']}</th></tr>";
             foreach ($vcInstallments as $a) {
                 $badge = match($a['status']) {
-                    'OVERDUE'   => '<span class="badge badge-overdue">OVERDUE</span>',
-                    'DUE_TODAY' => '<span class="badge badge-critical">TODAY</span>',
-                    default     => '<span class="badge badge-duesoon">DUE SOON</span>',
+                    'OVERDUE'   => "<span class=\"badge badge-overdue\">{$t['badgeOverdue']}</span>",
+                    'DUE_TODAY' => "<span class=\"badge badge-critical\">{$t['badgeToday']}</span>",
+                    default     => "<span class=\"badge badge-duesoon\">{$t['badgeDueSoon']}</span>",
                 };
                 $daysLabel = $a['days'] < 0
-                    ? abs($a['days']) . 'd overdue'
-                    : ($a['days'] === 0 ? 'today' : 'in ' . $a['days'] . 'd');
+                    ? $this->fmt($t['daysOverdue'], abs($a['days']))
+                    : ($a['days'] === 0 ? $t['dueToday'] : $this->fmt($t['dueIn'], $a['days']));
                 $html .= "<tr><td>{$a['car']}</td><td>#{$a['installment']}</td><td>$badge</td><td>{$a['dueDate']} <small style=\"color:#718096\">($daysLabel)</small></td><td>{$a['amount']} MAD</td></tr>";
             }
             $html .= '</table>';
         } else {
-            $html .= '<p class="no-issues">✅ No upcoming credit installments in the next 5 days.</p>';
+            $html .= "<p class=\"no-issues\">{$t['noVc']}</p>";
         }
 
         $html .= <<<HTML
           </div>
           <div class="footer">
-            This report is sent automatically every day at 10:00 AM by AGOCAR.<br>
-            Do not reply to this email.
+            {$t['footer']}
           </div>
         </div>
         </body>
@@ -598,5 +706,10 @@ class SendDailyEmailReportCommand extends Command
     private function count(array $arr): int
     {
         return count($arr);
+    }
+
+    private function fmt(string $template, int|string ...$values): string
+    {
+        return sprintf($template, ...$values);
     }
 }

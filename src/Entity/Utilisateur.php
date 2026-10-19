@@ -41,6 +41,9 @@ class Utilisateur implements UserInterface, PasswordAuthenticatedUserInterface
     #[ORM\Column(length: 255, nullable: true)]
     private ?string $photo = null;
 
+    #[ORM\Column(length: 2, options: ['default' => 'fr'])]
+    private string $langue = 'fr';
+
     #[ORM\Column(type: 'boolean', options: ['default' => true])]
     private bool $actif = true;
 
@@ -183,6 +186,9 @@ class Utilisateur implements UserInterface, PasswordAuthenticatedUserInterface
 
     public function getPhoto(): ?string { return $this->photo; }
     public function setPhoto(?string $photo): static { $this->photo = $photo; return $this; }
+
+    public function getLangue(): string { return $this->langue; }
+    public function setLangue(string $langue): static { $this->langue = in_array($langue, ['en', 'fr', 'ar'], true) ? $langue : 'fr'; return $this; }
 
     public function isActif(): bool { return $this->actif; }
     public function setActif(bool $actif): static { $this->actif = $actif; return $this; }

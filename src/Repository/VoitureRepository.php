@@ -133,16 +133,32 @@ class VoitureRepository extends ServiceEntityRepository
     }
 
     /**
+     * A car "visible on the public site" means different things depending on whether
+     * the visitor picked dates. With no dates: only cars free *right now*
+     * (voitureStatus = disponible) -- the honest "what can I drive today" view. With
+     * dates: a car currently out on an unrelated short rental (louee) or about to start
+     * one (reserve) is NOT actually unavailable for a booking three months from now --
+     * only an actual conflicting reservation should exclude it (handled separately via
+     * excludeIds), so status is widened to every temporary/operational state. Statuses
+     * with no knowable end date (maintenance, compliance-blocked, draft/setup, retired)
+     * stay excluded either way -- there's no date range that makes those safe to show.
+     */
+    private function applyPublicStatusFilter(\Doctrine\ORM\QueryBuilder $qb, array $filters): void
+    {
+        $hasDateFilter = array_key_exists('excludeIds', $filters);
+        $statuses = $hasDateFilter ? ['disponible', 'louee', 'reserve'] : ['disponible'];
+        $qb->andWhere('v.voitureStatus IN (:statuses)')->setParameter('statuses', $statuses);
+    }
+
+    /**
      * Cars visible on the public website: available, not deleted, plus optional
      * customer-facing filters. Kept separate from findWithFilters() so the admin
      * catalog's filtering/sorting can't be accidentally changed by public-site needs.
      */
     public function findPublicAvailable(array $filters, int $page, int $limit): array
     {
-        $qb = $this->createQueryBuilder('v')
-            ->where('v.deletedAt IS NULL')
-            ->andWhere('v.voitureStatus = :status')
-            ->setParameter('status', 'disponible');
+        $qb = $this->createQueryBuilder('v')->where('v.deletedAt IS NULL');
+        $this->applyPublicStatusFilter($qb, $filters);
 
         if (!empty($filters['categorie'])) {
             $qb->andWhere('v.categorie = :categorie')->setParameter('categorie', $filters['categorie']);
@@ -169,11 +185,8 @@ class VoitureRepository extends ServiceEntityRepository
 
     public function countPublicAvailable(array $filters): int
     {
-        $qb = $this->createQueryBuilder('v')
-            ->select('COUNT(v.id)')
-            ->where('v.deletedAt IS NULL')
-            ->andWhere('v.voitureStatus = :status')
-            ->setParameter('status', 'disponible');
+        $qb = $this->createQueryBuilder('v')->select('COUNT(v.id)')->where('v.deletedAt IS NULL');
+        $this->applyPublicStatusFilter($qb, $filters);
 
         if (!empty($filters['categorie'])) {
             $qb->andWhere('v.categorie = :categorie')->setParameter('categorie', $filters['categorie']);
@@ -192,5 +205,24 @@ class VoitureRepository extends ServiceEntityRepository
         }
 
         return (int) $qb->getQuery()->getSingleScalarResult();
+    }
+
+    /**
+     * Distinct category values actually present among publicly-visible vehicles --
+     * the public site's category filter options are derived from this rather than a
+     * hardcoded list, so an option is never offered unless it can return a result.
+     * @return string[]
+     */
+    public function findPublicCategories(): array
+    {
+        $qb = $this->createQueryBuilder('v')
+            ->select('DISTINCT v.categorie')
+            ->where('v.deletedAt IS NULL')
+            ->andWhere('v.categorie IS NOT NULL')
+            ->andWhere("v.categorie != ''");
+        $this->applyPublicStatusFilter($qb, []);
+        $qb->orderBy('v.categorie', 'ASC');
+
+        return array_column($qb->getQuery()->getScalarResult(), 'categorie');
     }
 }

@@ -2,7 +2,6 @@
 
 namespace App\Controller\Api;
 
-use App\Entity\Damage;
 use App\Entity\VehicleDelivery;
 use App\Fleet\Event\RentalStarted;
 use App\Fleet\FleetLifecycleManager;
@@ -275,23 +274,5 @@ class VehicleDeliveryController extends AbstractController
         if ($has('signatureClientDepart'))      $d->setSignatureClientDepart($val('signatureClientDepart'));
         if ($has('signatureDeuxiemeChauffeur')) $d->setSignatureDeuxiemeChauffeur($val('signatureDeuxiemeChauffeur'));
         if ($has('signatureSocieteDepart'))     $d->setSignatureSocieteDepart($val('signatureSocieteDepart'));
-
-        if ($has('damages') && is_array($data['damages'])) {
-            foreach ($d->getDamages()->toArray() as $existing) {
-                $d->removeDamage($existing);
-                $em->remove($existing);
-            }
-
-            foreach ($data['damages'] as $dmgData) {
-                $dmg = new Damage();
-                $dmg->setZone($dmgData['zone'] ?? 'AVANT');
-                $dmg->setDescription($dmgData['description'] ?? null);
-                $dmg->setSeverity($dmgData['type'] ?? $dmgData['severity'] ?? 'scratch');
-                $dmg->setX(isset($dmgData['x']) ? (float) $dmgData['x'] : null);
-                $dmg->setY(isset($dmgData['y']) ? (float) $dmgData['y'] : null);
-                $d->addDamage($dmg);
-                $em->persist($dmg);
-            }
-        }
     }
 }

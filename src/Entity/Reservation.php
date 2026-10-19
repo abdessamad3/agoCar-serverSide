@@ -15,6 +15,7 @@ use App\Entity\Paiement;
 #[ORM\Index(columns: ['client_id'],          name: 'idx_reservation_client')]
 #[ORM\Index(columns: ['reservation_status'], name: 'idx_res_status')]
 #[ORM\Index(columns: ['bureau_id'],          name: 'idx_reservation_bureau')]
+#[ORM\Index(columns: ['utilisateur_id'],     name: 'idx_reservation_utilisateur')]
 class Reservation
 {
     public const PAYMENT_UNPAID   = 'unpaid';
@@ -90,6 +91,15 @@ class Reservation
     #[ORM\ManyToOne(targetEntity: Client::class)]
     #[ORM\JoinColumn(nullable: false, name: 'client_id')]
     private ?Client $client = null;
+
+    /** Authenticated ROLE_CLIENT account that made this booking, if any — the only
+     *  authoritative ownership link for the customer portal's reservation history
+     *  (Phase 12.9 Stage C2). Never set from a staff/admin account, never inferred
+     *  from email equality, and never backfilled for pre-existing rows: stays NULL
+     *  for guest bookings and for every reservation that predates this column. */
+    #[ORM\ManyToOne(targetEntity: Utilisateur::class)]
+    #[ORM\JoinColumn(nullable: true, name: 'utilisateur_id', onDelete: 'SET NULL')]
+    private ?Utilisateur $utilisateur = null;
 
     #[ORM\ManyToOne(targetEntity: Voiture::class)]
     #[ORM\JoinColumn(nullable: false, name: 'voiture_id')]
@@ -188,6 +198,17 @@ class Reservation
     public function setClient(?Client $client): static
     {
         $this->client = $client;
+        return $this;
+    }
+
+    public function getUtilisateur(): ?Utilisateur
+    {
+        return $this->utilisateur;
+    }
+
+    public function setUtilisateur(?Utilisateur $utilisateur): static
+    {
+        $this->utilisateur = $utilisateur;
         return $this;
     }
 

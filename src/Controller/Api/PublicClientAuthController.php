@@ -2,7 +2,6 @@
 
 namespace App\Controller\Api;
 
-use App\Entity\Client;
 use App\Entity\Reservation;
 use App\Entity\Utilisateur;
 use Doctrine\ORM\EntityManagerInterface;
@@ -92,21 +91,17 @@ class PublicClientAuthController extends AbstractController
         /** @var Utilisateur $user */
         $user = $this->getUser();
 
-        // Find Client records matching this email, then fetch their reservations directly
-        $clients = $em->getRepository(Client::class)->findBy(['email' => $user->getEmail()]);
-
-        if (empty($clients)) {
-            return $this->json([]);
-        }
-
-        $clientIds = array_map(fn($c) => $c->getId(), $clients);
-
+        // Phase 12.9 Stage C2: ownership is the explicit Reservation.utilisateur
+        // link (set only at authenticated booking time, never inferred from email
+        // equality -- see PublicBookingController::create()). $user comes from the
+        // verified JWT subject, never a client-supplied id, so this can never be
+        // spoofed to read someone else's reservations.
         $reservations = $em->createQueryBuilder()
             ->select('r')
             ->from(Reservation::class, 'r')
-            ->where('r.client IN (:ids)')
+            ->where('r.utilisateur = :user')
             ->andWhere('r.deletedAt IS NULL')
-            ->setParameter('ids', $clientIds)
+            ->setParameter('user', $user)
             ->orderBy('r.creeAu', 'DESC')
             ->getQuery()
             ->getResult();

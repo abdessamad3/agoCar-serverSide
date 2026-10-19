@@ -147,10 +147,20 @@ class VehicleCreditPaymentController extends AbstractController
         return $this->json(['message' => 'Paiement enregistré', 'id' => $payment->getId()], 201);
     }
 
+    /** 'ROLE_MANAGER' alone (as used previously here) would wrongly exclude a
+     *  pure ROLE_ADMIN account -- there is no role hierarchy in this app, so
+     *  ROLE_ADMIN does not imply ROLE_MANAGER. Both must be checked explicitly. */
+    private function assertCanManageAttachments(): void
+    {
+        if (!$this->isGranted('ROLE_ADMIN') && !$this->isGranted('ROLE_MANAGER')) {
+            throw $this->createAccessDeniedException('Seuls les administrateurs et gestionnaires peuvent gérer les pièces jointes.');
+        }
+    }
+
     #[Route('/{id}/attachment', name: 'upload_attachment', methods: ['POST'])]
     public function uploadAttachment(VehicleCreditPayment $payment, Request $request, EntityManagerInterface $em): JsonResponse
     {
-        $this->denyAccessUnlessGranted('ROLE_MANAGER');
+        $this->assertCanManageAttachments();
         $this->assertBureauAccess($payment);
 
         $file = $request->files->get('file');
@@ -190,7 +200,7 @@ class VehicleCreditPaymentController extends AbstractController
     #[Route('/attachment/{id}', name: 'delete_attachment', methods: ['DELETE'])]
     public function deleteAttachment(PaymentAttachment $attachment, EntityManagerInterface $em): JsonResponse
     {
-        $this->denyAccessUnlessGranted('ROLE_MANAGER');
+        $this->assertCanManageAttachments();
         if ($attachment->getPayment()) $this->assertBureauAccess($attachment->getPayment());
 
         $diskPath = $this->getParameter('kernel.project_dir') . '/public' . $attachment->getFilePath();

@@ -63,16 +63,16 @@ class ApiExceptionSubscriber implements EventSubscriberInterface
             $this->errorLog->recordException($exception, $event->getRequest());
         }
 
-        // TEMP DEBUG — remove after diagnosing prod 500s
-        if ($status === 500) {
-            $body['_exc'] = get_class($exception);
-            $body['_msg'] = self::utf8($exception->getMessage());
-        }
-
-        // Expose stack trace only in dev — never in prod
+        // Expose exception class/message/file/line/trace only in dev — never
+        // in prod. (This used to also leak unconditionally as top-level
+        // '_exc'/'_msg' fields on every 500, regardless of environment —
+        // folded into this same dev-only gate instead of removed outright,
+        // since the class name + message are still useful when diagnosing
+        // locally.)
         if ($this->environment === 'dev') {
             $body['debug'] = [
                 'exception' => get_class($exception),
+                'message'   => self::utf8($exception->getMessage()),
                 'file'      => $exception->getFile(),
                 'line'      => $exception->getLine(),
                 'trace'     => array_map(

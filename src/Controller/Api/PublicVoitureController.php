@@ -115,7 +115,18 @@ class PublicVoitureController extends AbstractController
         ]);
     }
 
-    #[Route('/{id}', name: 'show', methods: ['GET'])]
+    /**
+     * Distinct category values actually used by publicly-visible vehicles -- the
+     * public site's filter dropdown is built from this instead of a hardcoded list
+     * that can drift out of sync with what staff actually enter on cars.
+     */
+    #[Route('/categories', name: 'categories', methods: ['GET'])]
+    public function categories(VoitureRepository $repo): JsonResponse
+    {
+        return $this->json(['data' => $repo->findPublicCategories()]);
+    }
+
+    #[Route('/{id}', name: 'show', methods: ['GET'], requirements: ['id' => '\d+'])]
     public function show(int $id, EntityManagerInterface $em): JsonResponse
     {
         $voiture = $em->getRepository(\App\Entity\Voiture::class)->find($id);

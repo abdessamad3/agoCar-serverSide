@@ -169,6 +169,19 @@ class PublicBookingController extends AbstractController
         $reservation->setMontantPaye('0.00');
         $reservation->setCreeAu(new \DateTimeImmutable());
 
+        // Phase 12.9 Stage C2: link this booking to the authenticated customer
+        // account, if any -- the only path that makes it visible in their portal
+        // history (PublicClientAuthController::myReservations()). Deliberately
+        // restricted to ROLE_CLIENT: a staff/admin JWT hitting this public
+        // endpoint (e.g. a kiosk workflow left logged into the admin app) must
+        // never have a customer's booking attributed to the staff member's own
+        // account. Anonymous guests leave this NULL -- guest checkout is
+        // unaffected either way.
+        $authenticatedUser = $this->getUser();
+        if ($authenticatedUser instanceof Utilisateur && in_array('ROLE_CLIENT', $authenticatedUser->getRoles(), true)) {
+            $reservation->setUtilisateur($authenticatedUser);
+        }
+
         $em->persist($booking);
         $em->persist($client);
         $em->persist($reservation);

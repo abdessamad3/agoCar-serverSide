@@ -17,6 +17,18 @@ class AchatInstallmentController extends AbstractController
 {
     use BureauAwareTrait;
 
+    /** Phase 12.5: confirmed the only Angular consumer is mensualite-list.component.ts,
+     *  behind the /mensualite route which Angular already gates to
+     *  ROLE_ADMIN/ROLE_MANAGER. list()/show() are left open (read access,
+     *  bureau-scoped, unaffected). Explicit OR-check, not a standalone
+     *  ROLE_MANAGER attribute: no role hierarchy exists. */
+    private function assertCanManage(): void
+    {
+        if (!$this->isGranted('ROLE_ADMIN') && !$this->isGranted('ROLE_MANAGER')) {
+            throw $this->createAccessDeniedException('Seuls les administrateurs et gestionnaires peuvent gérer les échéances.');
+        }
+    }
+
     /** Bureau-locked staff/managers may only touch installments belonging to their own
      *  bureau. True admins (getEffectiveBureauId() === null) are unrestricted. */
     private function assertBureauAccess(AchatInstallment $installment): void
@@ -113,6 +125,7 @@ class AchatInstallmentController extends AbstractController
         Request $request,
         EntityManagerInterface $em
     ): JsonResponse {
+        $this->assertCanManage();
         $this->assertBureauAccess($installment);
         $data = json_decode($request->getContent(), true);
 
@@ -138,6 +151,7 @@ class AchatInstallmentController extends AbstractController
     #[Route('/{id}', name: 'update', methods: ['PUT'])]
     public function update(AchatInstallment $installment, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertCanManage();
         $this->assertBureauAccess($installment);
         $data = json_decode($request->getContent(), true);
 
@@ -155,6 +169,7 @@ class AchatInstallmentController extends AbstractController
     #[Route('/{id}', name: 'delete', methods: ['DELETE'])]
     public function delete(AchatInstallment $installment, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertCanManage();
         $this->assertBureauAccess($installment);
         $em->remove($installment);
         $em->flush();

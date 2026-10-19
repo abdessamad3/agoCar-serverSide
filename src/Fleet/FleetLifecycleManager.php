@@ -556,7 +556,7 @@ class FleetLifecycleManager
             $event instanceof DecommissionInitiated                               => VehicleLifecycleState::DECOMMISSIONED,
             $event instanceof VehicleSold                                         => VehicleLifecycleState::SOLD,
             $event instanceof VehicleArchived                                     => VehicleLifecycleState::ARCHIVED,
-            $event instanceof ReturnInspectionCompleted && $event->hasDamage()   => VehicleLifecycleState::MAINTENANCE,
+            $event instanceof ReturnInspectionCompleted && $event->hasMajorDamage() => VehicleLifecycleState::MAINTENANCE,
             default                                                               => null,
         };
     }
@@ -691,16 +691,24 @@ class FleetLifecycleManager
             ->setParameter('today', $today)
             ->getQuery()->getSingleScalarResult();
 
-        // Open damage records — via return inspection OR direct voiture link (manual damage)
+        // Open damage that should actually keep a car out of the available fleet:
+        // manually-logged damage (always — a deliberate staff action), or return-time
+        // damage from an inspection marked 'major_damage'. Delivery-time damage and
+        // minor return damage are recorded (visible on the car's page) but don't block
+        // availability on their own — only major damage does, until repaired.
         $dQb = $this->em->createQueryBuilder();
         $openDamageCount = (int) $dQb
             ->select('COUNT(dmg.id)')
             ->from(Damage::class, 'dmg')
             ->leftJoin('dmg.returnInspection', 'ri')
-            ->leftJoin('ri.reservation', 'res')
-            ->where($dQb->expr()->orX('res.voiture = :voiture', 'dmg.voiture = :voiture'))
+            ->leftJoin('ri.reservation', 'resRet')
+            ->where($dQb->expr()->orX(
+                $dQb->expr()->andX('resRet.voiture = :voiture', 'ri.condition = :majorCondition'),
+                'dmg.voiture = :voiture'
+            ))
             ->andWhere('dmg.status = :open')
             ->setParameter('voiture', $voiture)
+            ->setParameter('majorCondition', 'major_damage')
             ->setParameter('open', 'open')
             ->getQuery()->getSingleScalarResult();
 
@@ -780,12 +788,18 @@ class FleetLifecycleManager
 
         // VehicleSold: archive active insurance records
         if ($event instanceof VehicleSold) {
+            // DQL UPDATE/DELETE statements cannot carry a JOIN clause (a
+            // fundamental DQL limitation, unlike SQL) -- the previous
+            // ->join('ass.depense', 'd') here left 'd' undefined, throwing
+            // a QueryException on every vehicle sale. Rewritten as a
+            // single-root UPDATE with a correlated subquery, which DQL
+            // does support, instead of generalizing a fix to the other
+            // (SELECT-only, already-valid) joins elsewhere in this class.
             $now = new \DateTimeImmutable();
             $affected = $this->em->createQueryBuilder()
                 ->update(Assurance::class, 'ass')
                 ->set('ass.archivedAt', ':now')
-                ->join('ass.depense', 'd')
-                ->where('d.voiture = :voiture')
+                ->where('ass.depense IN (SELECT d.id FROM ' . Depense::class . ' d WHERE d.voiture = :voiture)')
                 ->andWhere('ass.archivedAt IS NULL')
                 ->andWhere('ass.deletedAt IS NULL')
                 ->setParameter('now', $now)
