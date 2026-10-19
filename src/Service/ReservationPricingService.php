@@ -2,6 +2,7 @@
 
 namespace App\Service;
 
+use App\Entity\TarifSaisonnier;
 use App\Entity\Voiture;
 use App\Repository\TarifSaisonnierRepository;
 
@@ -22,13 +23,21 @@ class ReservationPricingService
         return max(1, (int) ceil(($fin->getTimestamp() - $debut->getTimestamp()) / 86400));
     }
 
+    /** The seasonal rule (if any) active for this vehicle on this date — exposed
+     *  separately from resolveDailyRate() so callers can explain *why* a price is
+     *  adjusted, not just show the adjusted number. */
+    public function resolveActiveTarif(Voiture $voiture, \DateTimeImmutable $date): ?TarifSaisonnier
+    {
+        return $this->tarifSaisonnierRepo->findActiveMatching($voiture, $date);
+    }
+
     /** Base vehicle rate, adjusted by whichever seasonal rule (if any) is active on the
      *  reservation's start date. The whole stay bills at this one rate — no proration
      *  for a stay that crosses into a different season partway through. */
     public function resolveDailyRate(Voiture $voiture, \DateTimeImmutable $dateDebut): string
     {
         $baseRate = (float) ($voiture->getPrixJour() ?? 0);
-        $rule     = $this->tarifSaisonnierRepo->findActiveMatching($voiture, $dateDebut);
+        $rule     = $this->resolveActiveTarif($voiture, $dateDebut);
         $rate     = $rule ? $rule->applyTo($baseRate) : $baseRate;
 
         return number_format($rate, 2, '.', '');

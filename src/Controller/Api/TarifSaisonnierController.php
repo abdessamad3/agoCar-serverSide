@@ -3,8 +3,8 @@
 namespace App\Controller\Api;
 
 use App\Entity\TarifSaisonnier;
-use App\Repository\BureauRepository;
 use App\Repository\TarifSaisonnierRepository;
+use App\Repository\VoitureRepository;
 use Doctrine\ORM\EntityManagerInterface;
 use App\Trait\PaginationTrait;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -36,8 +36,8 @@ class TarifSaisonnierController extends AbstractController
             'dateFin'        => $t->getDateFin()?->format('Y-m-d'),
             'typeAjustement' => $t->getTypeAjustement(),
             'valeur'         => $t->getValeur() !== null ? (float) $t->getValeur() : null,
-            'bureauId'       => $t->getBureau()?->getId(),
-            'bureauNom'      => $t->getBureau()?->getNom(),
+            'voitureId'      => $t->getVoiture()?->getId(),
+            'voitureLabel'   => $t->getVoiture() ? trim($t->getVoiture()->getMarque() . ' ' . $t->getVoiture()->getModele() . ' (' . $t->getVoiture()->getImmatriculation() . ')') : null,
             'actif'          => $t->isActif(),
             'creeAu'         => $t->getCreeAu()?->format('Y-m-d H:i:s'),
         ];
@@ -61,7 +61,7 @@ class TarifSaisonnierController extends AbstractController
     }
 
     #[Route('', name: 'create', methods: ['POST'])]
-    public function create(Request $request, EntityManagerInterface $em, BureauRepository $bureauRepo): JsonResponse
+    public function create(Request $request, EntityManagerInterface $em, VoitureRepository $voitureRepo): JsonResponse
     {
         $this->assertCanManage();
         $data = json_decode($request->getContent(), true) ?? [];
@@ -88,8 +88,8 @@ class TarifSaisonnierController extends AbstractController
         $tarif->setTypeAjustement($type);
         $tarif->setValeur(number_format((float) $data['valeur'], 2, '.', ''));
         $tarif->setActif($data['actif'] ?? true);
-        if (!empty($data['bureauId'])) {
-            $tarif->setBureau($bureauRepo->find((int) $data['bureauId']));
+        if (!empty($data['voitureId'])) {
+            $tarif->setVoiture($voitureRepo->find((int) $data['voitureId']));
         }
         $tarif->setCreeAu(new \DateTimeImmutable());
 
@@ -100,7 +100,7 @@ class TarifSaisonnierController extends AbstractController
     }
 
     #[Route('/{id}', name: 'update', methods: ['PUT'])]
-    public function update(TarifSaisonnier $tarifSaisonnier, Request $request, EntityManagerInterface $em, BureauRepository $bureauRepo): JsonResponse
+    public function update(TarifSaisonnier $tarifSaisonnier, Request $request, EntityManagerInterface $em, VoitureRepository $voitureRepo): JsonResponse
     {
         $this->assertCanManage();
         $data = json_decode($request->getContent(), true) ?? [];
@@ -123,8 +123,8 @@ class TarifSaisonnierController extends AbstractController
         }
         if (isset($data['valeur'])) $tarifSaisonnier->setValeur(number_format((float) $data['valeur'], 2, '.', ''));
         if (isset($data['actif']))  $tarifSaisonnier->setActif((bool) $data['actif']);
-        if (array_key_exists('bureauId', $data)) {
-            $tarifSaisonnier->setBureau(!empty($data['bureauId']) ? $bureauRepo->find((int) $data['bureauId']) : null);
+        if (array_key_exists('voitureId', $data)) {
+            $tarifSaisonnier->setVoiture(!empty($data['voitureId']) ? $voitureRepo->find((int) $data['voitureId']) : null);
         }
 
         $em->flush();

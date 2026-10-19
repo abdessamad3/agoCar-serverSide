@@ -13,7 +13,7 @@ use Doctrine\ORM\Mapping as ORM;
 #[ORM\Entity(repositoryClass: TarifSaisonnierRepository::class)]
 #[ORM\Index(columns: ['date_debut'], name: 'idx_tarif_saisonnier_date_debut')]
 #[ORM\Index(columns: ['date_fin'],   name: 'idx_tarif_saisonnier_date_fin')]
-#[ORM\Index(columns: ['bureau_id'],  name: 'idx_tarif_saisonnier_bureau')]
+#[ORM\Index(columns: ['voiture_id'], name: 'idx_tarif_saisonnier_voiture')]
 class TarifSaisonnier
 {
     public const TYPE_PERCENTAGE = 'percentage';
@@ -41,10 +41,10 @@ class TarifSaisonnier
     #[ORM\Column(type: 'decimal', precision: 10, scale: 2)]
     private ?string $valeur = null;
 
-    /** Null = applies to every bureau. Set = only vehicles in that bureau. */
-    #[ORM\ManyToOne(targetEntity: Bureau::class)]
-    #[ORM\JoinColumn(nullable: true, name: 'bureau_id', onDelete: 'SET NULL')]
-    private ?Bureau $bureau = null;
+    /** Null = applies to every vehicle. Set = only this specific vehicle. */
+    #[ORM\ManyToOne(targetEntity: Voiture::class)]
+    #[ORM\JoinColumn(nullable: true, name: 'voiture_id', onDelete: 'SET NULL')]
+    private ?Voiture $voiture = null;
 
     #[ORM\Column(options: ['default' => true])]
     private bool $actif = true;
@@ -72,8 +72,8 @@ class TarifSaisonnier
     public function getValeur(): ?string { return $this->valeur; }
     public function setValeur(string $v): static { $this->valeur = $v; return $this; }
 
-    public function getBureau(): ?Bureau { return $this->bureau; }
-    public function setBureau(?Bureau $v): static { $this->bureau = $v; return $this; }
+    public function getVoiture(): ?Voiture { return $this->voiture; }
+    public function setVoiture(?Voiture $v): static { $this->voiture = $v; return $this; }
 
     public function isActif(): bool { return $this->actif; }
     public function setActif(bool $v): static { $this->actif = $v; return $this; }

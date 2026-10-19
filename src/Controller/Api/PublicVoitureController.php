@@ -3,6 +3,7 @@
 namespace App\Controller\Api;
 
 use App\Repository\VoitureRepository;
+use App\Service\ReservationPricingService;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -18,6 +19,8 @@ use Symfony\Component\Routing\Annotation\Route;
 class PublicVoitureController extends AbstractController
 {
     private const DEFAULT_LIMIT = 20;
+
+    public function __construct(private readonly ReservationPricingService $pricing) {}
 
     /**
      * Guards against DB rows containing mis-encoded bytes (e.g. Latin-1 text
@@ -38,8 +41,14 @@ class PublicVoitureController extends AbstractController
         return $fixed !== false ? $fixed : preg_replace('/[\x80-\xFF]/', '', $value);
     }
 
-    private function serializeCard(\App\Entity\Voiture $v): array
+    /** @param \DateTimeImmutable $resolveDate Date to resolve any active seasonal rule
+     *  against — defaults to "today" everywhere this is called from, or the customer's
+     *  chosen start date once they've picked one. */
+    private function serializeCard(\App\Entity\Voiture $v, \DateTimeImmutable $resolveDate): array
     {
+        $basePrice = (float) ($v->getPrixJour() ?? 0);
+        $tarif     = $this->pricing->resolveActiveTarif($v, $resolveDate);
+
         return [
             'id'            => $v->getId(),
             'marque'        => self::utf8($v->getMarque()),
@@ -55,15 +64,21 @@ class PublicVoitureController extends AbstractController
             'climatisation' => $v->isClimatisation(),
             'couleur'       => self::utf8($v->getCouleur()),
             'prixJour'      => $v->getPrixJour(),
+            'prixJourAjuste'=> $tarif ? number_format($tarif->applyTo($basePrice), 2, '.', '') : $v->getPrixJour(),
             'prixSemaine'   => $v->getPrixSemaine(),
             'prixMois'      => $v->getPrixMois(),
             'image'         => self::utf8($v->getImagePath()),
+            'tarifActif'    => $tarif ? [
+                'libelle'        => $tarif->getLibelle(),
+                'typeAjustement' => $tarif->getTypeAjustement(),
+                'valeur'         => (float) $tarif->getValeur(),
+            ] : null,
         ];
     }
 
-    private function serializeDetail(\App\Entity\Voiture $v): array
+    private function serializeDetail(\App\Entity\Voiture $v, \DateTimeImmutable $resolveDate): array
     {
-        return $this->serializeCard($v) + [
+        return $this->serializeCard($v, $resolveDate) + [
             'images' => array_values(array_map(
                 fn($img) => ['id' => $img->getId(), 'path' => self::utf8($img->getImagePath()), 'position' => $img->getPosition()],
                 $v->getImages()->toArray()
@@ -102,8 +117,12 @@ class PublicVoitureController extends AbstractController
         $total = $repo->countPublicAvailable($filters);
         $totalPages = max(1, (int) ceil($total / $limit));
 
+        // Resolve seasonal pricing against the customer's chosen start date once they've
+        // picked one, otherwise "today" -- matches what they'd actually see quoted.
+        $resolveDate = isset($dateDebut) ? $dateDebut : new \DateTimeImmutable('today');
+
         return $this->json([
-            'data' => array_map(fn($v) => $this->serializeCard($v), $items),
+            'data' => array_map(fn($v) => $this->serializeCard($v, $resolveDate), $items),
             'meta' => [
                 'total'       => $total,
                 'page'        => $page,
@@ -127,7 +146,7 @@ class PublicVoitureController extends AbstractController
     }
 
     #[Route('/{id}', name: 'show', methods: ['GET'], requirements: ['id' => '\d+'])]
-    public function show(int $id, EntityManagerInterface $em): JsonResponse
+    public function show(int $id, Request $request, EntityManagerInterface $em): JsonResponse
     {
         $voiture = $em->getRepository(\App\Entity\Voiture::class)->find($id);
 
@@ -135,7 +154,63 @@ class PublicVoitureController extends AbstractController
             return $this->json(['error' => 'Véhicule introuvable'], 404);
         }
 
-        return $this->json($this->serializeDetail($voiture));
+        $resolveDate = new \DateTimeImmutable('today');
+        $dateDebutStr = $request->query->get('dateDebut', '');
+        if ($dateDebutStr) {
+            try {
+                $resolveDate = new \DateTimeImmutable($dateDebutStr);
+            } catch (\Exception) {
+                // ignore malformed date -- fall back to today
+            }
+        }
+
+        return $this->json($this->serializeDetail($voiture, $resolveDate));
+    }
+
+    /**
+     * Resolved pricing for a specific stay, used by the booking flow once the customer
+     * has picked dates -- the authoritative number for what they'll actually pay, not
+     * just a display hint. Read-only and unauthenticated like the rest of this controller;
+     * a guest's reservation is still priced server-side again at submission time.
+     */
+    #[Route('/{id}/pricing', name: 'pricing', methods: ['GET'], requirements: ['id' => '\d+'])]
+    public function pricing(int $id, Request $request, EntityManagerInterface $em): JsonResponse
+    {
+        $voiture = $em->getRepository(\App\Entity\Voiture::class)->find($id);
+        if (!$voiture || $voiture->getDeletedAt() !== null || $voiture->getVoitureStatus() !== 'disponible') {
+            return $this->json(['error' => 'Véhicule introuvable'], 404);
+        }
+
+        $dateDebutStr = $request->query->get('dateDebut', '');
+        $dateFinStr   = $request->query->get('dateFin', '');
+        if (!$dateDebutStr || !$dateFinStr) {
+            return $this->json(['error' => 'dateDebut et dateFin sont requis'], 422);
+        }
+        try {
+            $dateDebut = new \DateTimeImmutable($dateDebutStr);
+            $dateFin   = new \DateTimeImmutable($dateFinStr);
+        } catch (\Exception) {
+            return $this->json(['error' => 'Dates invalides'], 422);
+        }
+        if ($dateFin <= $dateDebut) {
+            return $this->json(['error' => 'La date de fin doit être après la date de début'], 422);
+        }
+
+        $days        = $this->pricing->computeDays($dateDebut, $dateFin);
+        $prixParJour = $this->pricing->resolveDailyRate($voiture, $dateDebut);
+        $tarif       = $this->pricing->resolveActiveTarif($voiture, $dateDebut);
+
+        return $this->json([
+            'prixJour'       => $voiture->getPrixJour(),
+            'prixParJour'    => (float) $prixParJour,
+            'nbJours'        => $days,
+            'total'          => (float) number_format(((float) $prixParJour) * $days, 2, '.', ''),
+            'tarifActif'     => $tarif ? [
+                'libelle'        => $tarif->getLibelle(),
+                'typeAjustement' => $tarif->getTypeAjustement(),
+                'valeur'         => (float) $tarif->getValeur(),
+            ] : null,
+        ]);
     }
 
     #[Route('/{id}/blocked-periods', name: 'blocked_periods', methods: ['GET'])]

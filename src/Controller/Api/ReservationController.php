@@ -90,7 +90,7 @@ class ReservationController extends AbstractController
             ->leftJoin('r.client', 'c')
             ->orderBy('r.dateDebut', 'DESC');
 
-        if ($bureauId) {
+        if ($bureauId !== null) {
             $qb->andWhere('v.bureau = :bureauId')->setParameter('bureauId', $bureauId);
         }
         if ($clientId) {
@@ -421,12 +421,18 @@ class ReservationController extends AbstractController
 
         $pricing = $this->pricing->computeTotal($voiture, $dateDebut, $dateFin, $accessoires, $remiseMontant);
         $days    = $this->pricing->computeDays($dateDebut, $dateFin);
+        $tarif   = $this->pricing->resolveActiveTarif($voiture, $dateDebut);
 
         return $this->json([
             'prixParJour'     => (float) $pricing['prixParJour'],
             'nbJours'         => $days,
             'accessoireTotal' => array_sum(array_map(fn($a) => (float) $a->getPrix() * $days, $accessoires)),
             'total'           => (float) $pricing['total'],
+            'tarifActif'      => $tarif ? [
+                'libelle'        => $tarif->getLibelle(),
+                'typeAjustement' => $tarif->getTypeAjustement(),
+                'valeur'         => (float) $tarif->getValeur(),
+            ] : null,
         ]);
     }
 
