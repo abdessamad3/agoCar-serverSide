@@ -338,6 +338,12 @@ class VignetteController extends AbstractController
     public function delete(Vignette $vignette, EntityManagerInterface $em): JsonResponse
     {
         $this->assertBureauAccess($vignette);
+        if (DepensePaymentService::hasPaymentHistory($vignette->getDepense(), $this->paieRepo)) {
+            return $this->json([
+                'error'   => 'has_payments',
+                'message' => "Cette vignette a des paiements enregistrés et ne peut pas être supprimée. Supprimez d'abord le(s) paiement(s) enregistré(s).",
+            ], 422);
+        }
         $voiture = $vignette->getDepense()?->getVoiture();
         $snap    = $this->snapshotVignette($vignette);
         $id      = $vignette->getId();

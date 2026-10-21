@@ -4,8 +4,14 @@ namespace App\Controller\Api;
 
 use App\Entity\Bureau;
 use App\Entity\Depense;
+use App\Repository\AdblueRepository;
+use App\Repository\AssuranceRepository;
 use App\Repository\BureauRepository;
 use App\Repository\PaiementDepenseRepository;
+use App\Repository\ReparationRepository;
+use App\Repository\SuiviTechniqueRepository;
+use App\Repository\VidangeRepository;
+use App\Repository\VignetteRepository;
 use App\Repository\VoitureRepository;
 use App\Service\ActivityLogService;
 use App\Service\DepensePaymentService;
@@ -35,7 +41,54 @@ class DepenseController extends AbstractController
         private ActivityLogService        $activityLog,
         private PaiementDepenseRepository $paieDepRepo,
         private DepensePaymentService     $depensePaymentService,
+        private VignetteRepository        $vignetteRepo,
+        private AssuranceRepository       $assuranceRepo,
+        private ReparationRepository      $reparationRepo,
+        private VidangeRepository         $vidangeRepo,
+        private AdblueRepository          $adblueRepo,
+        private SuiviTechniqueRepository  $suiviTechniqueRepo,
     ) {}
+
+    /**
+     * Whether this Depense is still referenced by an ACTIVE (non-soft-deleted)
+     * operational record of any of the six expense-generating modules. Each of
+     * those modules' own repositories already runs behind the global
+     * `soft_delete` Doctrine filter, so a subtype row that was itself deleted,
+     * or superseded by a renewal (which soft-deletes the OLD row -- see
+     * VignetteController::renew()/AssuranceController::renew()), never matches
+     * here; only a currently-active one does. An Assurance that is merely
+     * *archived* (AssuranceController::renew()'s old policy, or a cancelled
+     * one) still blocks deletion deliberately -- archived/cancelled is not the
+     * same as deleted, and its Depense is still real historical data.
+     *
+     * Checks all six, not just the first type found: nothing in the schema
+     * stops two different subtypes from being created against the same
+     * depenseId (each subtype's own OneToOne only enforces uniqueness within
+     * its own type), so a Depense could in principle be linked to more than
+     * one. Returns the first match found, which is enough to correctly block
+     * the deletion and name a module to the user even in that edge case.
+     *
+     * @return array{label: string}|null
+     */
+    private function findActiveLinkedSubtype(Depense $depense): ?array
+    {
+        $checks = [
+            ['label' => 'une vignette',          'repo' => $this->vignetteRepo],
+            ['label' => 'une assurance',         'repo' => $this->assuranceRepo],
+            ['label' => 'une réparation',        'repo' => $this->reparationRepo],
+            ['label' => 'une vidange',           'repo' => $this->vidangeRepo],
+            ['label' => 'un plein AdBlue',       'repo' => $this->adblueRepo],
+            ['label' => 'un contrôle technique', 'repo' => $this->suiviTechniqueRepo],
+        ];
+
+        foreach ($checks as $check) {
+            if ($check['repo']->findOneBy(['depense' => $depense]) !== null) {
+                return $check;
+            }
+        }
+
+        return null;
+    }
 
     /** Bureau-locked staff/managers may only touch expenses belonging to their own
      *  bureau. True admins (getEffectiveBureauId() === null) are unrestricted. */
@@ -77,7 +130,7 @@ class DepenseController extends AbstractController
         $bureauId          = $effectiveBureauId ?? ($filterBureauId ? (int) $filterBureauId : null);
 
         $applyBureau = function (\Doctrine\ORM\QueryBuilder $qb) use ($bureauId): void {
-            if ($bureauId) {
+            if ($bureauId !== null) {
                 $qb->andWhere('d.bureau = :bid')->setParameter('bid', $bureauId);
             }
         };
@@ -176,7 +229,7 @@ class DepenseController extends AbstractController
         }
 
         // Bureau scoping: user's bureau takes priority over admin filter
-        if ($effectiveBureauId) {
+        if ($effectiveBureauId !== null) {
             if ($type === 'vehicle') {
                 $qb->andWhere('vb.id = :bureauId')->setParameter('bureauId', $effectiveBureauId);
             } elseif ($type === 'bureau') {
@@ -341,6 +394,21 @@ class DepenseController extends AbstractController
     ): JsonResponse {
         $data = json_decode($request->getContent(), true);
 
+        /** @var \App\Entity\Utilisateur $user */
+        $user = $this->getUser();
+        if (!$user->getBureau() && !in_array('ROLE_ADMIN', $user->getRoles(), true)) {
+            // A non-admin account with no bureau assigned is misconfigured --
+            // it must not be able to create a standing expense record that it
+            // (and every other bureau-scoped reader) can never reach again
+            // afterward. Admins remain free to create bureau-less or
+            // admin-chosen-bureau expenses; a properly configured, bureau-
+            // assigned staff member is never affected by this check at all.
+            return $this->json([
+                'error'   => 'no_bureau_assigned',
+                'message' => "Votre compte n'est associé à aucune agence et ne peut pas créer de dépense. Contactez un administrateur.",
+            ], 403);
+        }
+
         $depense = new Depense();
         $depense->setDateDebut(new \DateTimeImmutable($data['dateDebut'] ?? $data['date'] ?? 'now'));
         if (!empty($data['dateFin'])) $depense->setDateFin(new \DateTimeImmutable($data['dateFin']));
@@ -382,11 +450,12 @@ class DepenseController extends AbstractController
             }
         }
 
-        /** @var \App\Entity\Utilisateur $user */
-        $user = $this->getUser();
         if ($user->getBureau()) {
             $depense->setBureau($user->getBureau());
-        } elseif (!empty($data['bureauId'])) {
+        } elseif (!empty($data['bureauId']) && in_array('ROLE_ADMIN', $user->getRoles(), true)) {
+            // Only a true admin (bureau-less by design) may choose an arbitrary
+            // target bureau here -- a misconfigured non-admin account with no
+            // bureau assigned must not be able to pick one via request data.
             $bureau = $bureauRepo->find($data['bureauId']);
             if ($bureau) $depense->setBureau($bureau);
         }
@@ -472,6 +541,21 @@ class DepenseController extends AbstractController
     public function delete(Depense $depense, EntityManagerInterface $em): JsonResponse
     {
         $this->assertBureauAccess($depense);
+        if (DepensePaymentService::hasPaymentHistory($depense, $this->paieDepRepo)) {
+            return $this->json([
+                'error'   => 'has_payments',
+                'message' => "Cette dépense a des paiements enregistrés et ne peut pas être supprimée. Supprimez d'abord le(s) paiement(s) enregistré(s).",
+            ], 422);
+        }
+
+        $linked = $this->findActiveLinkedSubtype($depense);
+        if ($linked !== null) {
+            return $this->json([
+                'error'   => 'linked_to_active_record',
+                'message' => "Cette dépense est liée à {$linked['label']} active et ne peut pas être supprimée ici. Supprimez-la depuis son module d'origine.",
+            ], 422);
+        }
+
         $snap   = $this->snapshotDepense($depense);
         $id     = $depense->getId();
         $bureau = $depense->getBureau();

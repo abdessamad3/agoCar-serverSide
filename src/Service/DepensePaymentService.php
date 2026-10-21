@@ -6,10 +6,23 @@ use App\Entity\Depense;
 use App\Entity\PaiementDepense;
 use App\Enum\StatusEnum;
 use App\Enum\PaymentTypeEnum;
+use App\Repository\PaiementDepenseRepository;
 use Doctrine\ORM\EntityManagerInterface;
 
 class DepensePaymentService
 {
+    /**
+     * Whether this expense already has real, non-deleted payment history.
+     * Used to block hard-deleting a Depense (or the subtype record that owns
+     * it) out from under its own payment trail -- NOT applied to cancel/renew
+     * actions, which are the intended way to retire a record while keeping
+     * its payment history intact.
+     */
+    public static function hasPaymentHistory(?Depense $depense, PaiementDepenseRepository $paieRepo): bool
+    {
+        return $depense?->getId() !== null && $paieRepo->countByDepense($depense->getId()) > 0;
+    }
+
     public function recalculate(int $depenseId, EntityManagerInterface $em): void
     {
         $depense = $em->find(Depense::class, $depenseId);

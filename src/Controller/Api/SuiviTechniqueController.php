@@ -200,6 +200,12 @@ class SuiviTechniqueController extends AbstractController
     public function delete(SuiviTechnique $suivi, EntityManagerInterface $em): JsonResponse
     {
         $this->assertBureauAccess($suivi);
+        if (DepensePaymentService::hasPaymentHistory($suivi->getDepense(), $this->paieRepo)) {
+            return $this->json([
+                'error'   => 'has_payments',
+                'message' => "Ce contrôle technique a des paiements enregistrés et ne peut pas être supprimé. Supprimez d'abord le(s) paiement(s) enregistré(s).",
+            ], 422);
+        }
         $voiture = $suivi->getVoiture();
         $suivi->setDeletedAt(new \DateTimeImmutable());
         if ($suivi->getDepense()) {

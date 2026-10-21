@@ -195,6 +195,12 @@ class VidangeController extends AbstractController
     public function delete(Vidange $vidange, EntityManagerInterface $em): JsonResponse
     {
         $this->assertBureauAccess($vidange);
+        if (DepensePaymentService::hasPaymentHistory($vidange->getDepense(), $this->paieRepo)) {
+            return $this->json([
+                'error'   => 'has_payments',
+                'message' => "Cette vidange a des paiements enregistrés et ne peut pas être supprimée. Supprimez d'abord le(s) paiement(s) enregistré(s).",
+            ], 422);
+        }
         $vidange->setDeletedAt(new \DateTimeImmutable());
         if ($vidange->getDepense()) {
             $vidange->getDepense()->setDeletedAt(new \DateTimeImmutable());

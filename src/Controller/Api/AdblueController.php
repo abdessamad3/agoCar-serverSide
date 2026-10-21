@@ -29,6 +29,18 @@ class AdblueController extends AbstractController
         private DepensePaymentService     $paymentService
     ) {}
 
+    /** Bureau-locked staff/managers may only touch AdBlue records belonging to
+     *  their own bureau. True admins (getEffectiveBureauId() === null) are unrestricted. */
+    private function assertBureauAccess(Adblue $adblue): void
+    {
+        $bureauId = $this->getEffectiveBureauId();
+        if ($bureauId === null) return;
+
+        if ($adblue->getDepense()?->getVoiture()?->getBureau()?->getId() !== $bureauId) {
+            throw $this->createNotFoundException('Adblue introuvable');
+        }
+    }
+
     private function serialize(Adblue $a): array
     {
         $dep  = $a->getDepense();
@@ -68,7 +80,7 @@ class AdblueController extends AbstractController
             ->join('d.voiture', 'v')
             ->orderBy('ab.creeAu', 'DESC');
 
-        if ($bureauId) {
+        if ($bureauId !== null) {
             $qb->where('v.bureau = :bureauId')->setParameter('bureauId', $bureauId);
         }
 
@@ -84,6 +96,7 @@ class AdblueController extends AbstractController
     #[Route('/{id}', name: 'show', methods: ['GET'])]
     public function show(Adblue $adblue): JsonResponse
     {
+        $this->assertBureauAccess($adblue);
         return $this->json($this->serialize($adblue));
     }
 
@@ -139,6 +152,7 @@ class AdblueController extends AbstractController
     #[Route('/{id}', name: 'update', methods: ['PUT'])]
     public function update(Adblue $adblue, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertBureauAccess($adblue);
         $data = json_decode($request->getContent(), true);
 
         $quantite = $data['quantite'] ?? $data['quantiteLitre'] ?? null;
@@ -164,6 +178,13 @@ class AdblueController extends AbstractController
     #[Route('/{id}', name: 'delete', methods: ['DELETE'])]
     public function delete(Adblue $adblue, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertBureauAccess($adblue);
+        if (DepensePaymentService::hasPaymentHistory($adblue->getDepense(), $this->paieRepo)) {
+            return $this->json([
+                'error'   => 'has_payments',
+                'message' => "Cet AdBlue a des paiements enregistrés et ne peut pas être supprimé. Supprimez d'abord le(s) paiement(s) enregistré(s).",
+            ], 422);
+        }
         $adblue->setDeletedAt(new \DateTimeImmutable());
         if ($adblue->getDepense()) {
             $adblue->getDepense()->setDeletedAt(new \DateTimeImmutable());

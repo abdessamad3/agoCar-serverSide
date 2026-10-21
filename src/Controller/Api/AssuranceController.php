@@ -121,7 +121,7 @@ class AssuranceController extends AbstractController
             ->where('a.deletedAt IS NULL')
             ->orderBy('d.dateDebut', 'ASC');
 
-        if ($bureauId) {
+        if ($bureauId !== null) {
             $qb->andWhere('v.bureau = :bureauId')->setParameter('bureauId', $bureauId);
         }
         if ($voitureId) {
@@ -390,7 +390,7 @@ class AssuranceController extends AbstractController
     {
         $this->assertBureauAccess($assurance);
         $dep = $assurance->getDepense();
-        if ($dep && $this->paieRepo->countByDepense($dep->getId()) > 0) {
+        if (DepensePaymentService::hasPaymentHistory($dep, $this->paieRepo)) {
             return $this->json([
                 'error'   => 'has_payments',
                 'message' => 'Cette assurance a des paiements enregistrés et ne peut pas être supprimée. Utilisez Annuler à la place.',

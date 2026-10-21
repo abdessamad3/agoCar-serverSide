@@ -205,6 +205,12 @@ class ReparationController extends AbstractController
     public function delete(Reparation $reparation, EntityManagerInterface $em): JsonResponse
     {
         $this->assertBureauAccess($reparation);
+        if (DepensePaymentService::hasPaymentHistory($reparation->getDepense(), $this->paieRepo)) {
+            return $this->json([
+                'error'   => 'has_payments',
+                'message' => "Cette réparation a des paiements enregistrés et ne peut pas être supprimée. Supprimez d'abord le(s) paiement(s) enregistré(s).",
+            ], 422);
+        }
         $voiture = $reparation->getDepense()?->getVoiture();
         $reparation->setDeletedAt(new \DateTimeImmutable());
         if ($reparation->getDepense()) {
