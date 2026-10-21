@@ -45,6 +45,33 @@ class ParametresSociete
     #[ORM\Column(length: 30, nullable: true)]
     private ?string $whatsapp = null;
 
+    /** Rotating ticker promo, per language. Null/empty = hidden on the public site. */
+    #[ORM\Column(type: 'json', nullable: true)]
+    private ?array $promoMessage = null;
+
+    /** Opening hours text, per language. Falls back to the site's current real
+     *  hours when unset, so the public site never shows a blank schedule. */
+    #[ORM\Column(type: 'json', nullable: true)]
+    private ?array $horaires = null;
+
+    #[ORM\Column(length: 500, nullable: true)]
+    private ?string $facebookUrl = null;
+
+    #[ORM\Column(length: 500, nullable: true)]
+    private ?string $instagramUrl = null;
+
+    #[ORM\Column(length: 500, nullable: true)]
+    private ?string $tiktokUrl = null;
+
+    /** Public "happy clients" stat shown on the site. Falls back to the figure
+     *  already printed on the About/Trust sections until an admin overrides it. */
+    #[ORM\Column(nullable: true)]
+    private ?int $nombreClients = null;
+
+    /** Public "cities covered" stat. Same fallback reasoning as nombreClients. */
+    #[ORM\Column(nullable: true)]
+    private ?int $villesDesservies = null;
+
     public function getId(): int { return $this->id; }
     public function setId(int $id): static { $this->id = $id; return $this; }
 
@@ -80,4 +107,32 @@ class ParametresSociete
 
     public function getWhatsapp(): ?string { return $this->whatsapp; }
     public function setWhatsapp(?string $whatsapp): static { $this->whatsapp = $whatsapp; return $this; }
+
+    public function getPromoMessage(): ?array { return $this->promoMessage; }
+    public function setPromoMessage(?array $promoMessage): static { $this->promoMessage = $promoMessage; return $this; }
+
+    public function getHoraires(): array
+    {
+        return $this->horaires ?? [
+            'fr' => 'Tous les jours, de 8h à 22h',
+            'en' => 'Every day, 8am to 10pm',
+            'ar' => 'كل يوم، من 8 صباحًا إلى 10 مساءً',
+        ];
+    }
+    public function setHoraires(?array $horaires): static { $this->horaires = $horaires; return $this; }
+
+    public function getFacebookUrl(): ?string { return $this->facebookUrl; }
+    public function setFacebookUrl(?string $facebookUrl): static { $this->facebookUrl = $facebookUrl; return $this; }
+
+    public function getInstagramUrl(): ?string { return $this->instagramUrl; }
+    public function setInstagramUrl(?string $instagramUrl): static { $this->instagramUrl = $instagramUrl; return $this; }
+
+    public function getTiktokUrl(): ?string { return $this->tiktokUrl; }
+    public function setTiktokUrl(?string $tiktokUrl): static { $this->tiktokUrl = $tiktokUrl; return $this; }
+
+    public function getNombreClients(): int { return $this->nombreClients ?? 12000; }
+    public function setNombreClients(?int $nombreClients): static { $this->nombreClients = $nombreClients; return $this; }
+
+    public function getVillesDesservies(): int { return $this->villesDesservies ?? 8; }
+    public function setVillesDesservies(?int $villesDesservies): static { $this->villesDesservies = $villesDesservies; return $this; }
 }

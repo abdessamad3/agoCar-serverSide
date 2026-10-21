@@ -40,6 +40,13 @@ class ParametresSocieteController extends AbstractController
             'email'         => $ps->getEmail(),
             'website'       => $ps->getWebsite(),
             'whatsapp'      => $ps->getWhatsapp(),
+            'promoMessage'      => $ps->getPromoMessage(),
+            'horaires'          => $ps->getHoraires(),
+            'facebookUrl'       => $ps->getFacebookUrl(),
+            'instagramUrl'      => $ps->getInstagramUrl(),
+            'tiktokUrl'         => $ps->getTiktokUrl(),
+            'nombreClients'     => $ps->getNombreClients(),
+            'villesDesservies'  => $ps->getVillesDesservies(),
         ];
     }
 
@@ -65,6 +72,13 @@ class ParametresSocieteController extends AbstractController
         if (array_key_exists('email', $data))         $ps->setEmail($data['email']);
         if (array_key_exists('website', $data))       $ps->setWebsite($data['website']);
         if (array_key_exists('whatsapp', $data))      $ps->setWhatsapp($data['whatsapp']);
+        if (array_key_exists('promoMessage', $data))     $ps->setPromoMessage(is_array($data['promoMessage']) ? $data['promoMessage'] : null);
+        if (array_key_exists('horaires', $data))         $ps->setHoraires(is_array($data['horaires']) ? $data['horaires'] : null);
+        if (array_key_exists('facebookUrl', $data))      $ps->setFacebookUrl($data['facebookUrl'] ?: null);
+        if (array_key_exists('instagramUrl', $data))     $ps->setInstagramUrl($data['instagramUrl'] ?: null);
+        if (array_key_exists('tiktokUrl', $data))        $ps->setTiktokUrl($data['tiktokUrl'] ?: null);
+        if (array_key_exists('nombreClients', $data))    $ps->setNombreClients($data['nombreClients'] !== null && $data['nombreClients'] !== '' ? (int) $data['nombreClients'] : null);
+        if (array_key_exists('villesDesservies', $data)) $ps->setVillesDesservies($data['villesDesservies'] !== null && $data['villesDesservies'] !== '' ? (int) $data['villesDesservies'] : null);
 
         $em->flush();
         return $this->json($this->serialize($ps));
