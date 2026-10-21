@@ -25,13 +25,13 @@ class DeuxiemeChauffeur
     #[ORM\Column(length: 50, nullable: true)]
     private ?string $permisConduite = null;
 
-    #[ORM\Column(type: 'date', nullable: true)]
+    #[ORM\Column(type: 'date_immutable', nullable: true)]
     private ?\DateTimeImmutable $permisDelivreLe = null;
 
     #[ORM\Column(length: 100, nullable: true)]
     private ?string $permisDelivreA = null;
 
-    #[ORM\Column(type: 'date', nullable: true)]
+    #[ORM\Column(type: 'date_immutable', nullable: true)]
     private ?\DateTimeImmutable $dateNaissance = null;
 
     #[ORM\Column(length: 255, nullable: true)]
@@ -49,7 +49,7 @@ class DeuxiemeChauffeur
     #[ORM\Column(length: 30, nullable: true)]
     private ?string $passeport = null;
 
-    #[ORM\Column(type: 'date', nullable: true)]
+    #[ORM\Column(type: 'date_immutable', nullable: true)]
     private ?\DateTimeImmutable $passeportDelivreLe = null;
 
     #[ORM\Column(length: 100, nullable: true)]
