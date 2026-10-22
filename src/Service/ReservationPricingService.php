@@ -58,15 +58,18 @@ class ReservationPricingService
         $prixParJour  = $this->resolveDailyRate($voiture, $debut);
         $accessoryTotal = 0.0;
         foreach ($accessoires as $accessoire) {
-            $accessoryTotal += ((float) $accessoire->getPrix()) * $days;
+            $accessoryTotal += $accessoire->getTypeTarification() === 'unique'
+                ? (float) $accessoire->getPrix()
+                : ((float) $accessoire->getPrix()) * $days;
         }
 
         $total = ((float) $prixParJour * $days) + $accessoryTotal - (float) ($remiseMontant ?? 0);
         $total = max(0.0, $total);
 
         return [
-            'prixParJour' => $prixParJour,
-            'total'       => number_format($total, 2, '.', ''),
+            'prixParJour'     => $prixParJour,
+            'accessoireTotal' => $accessoryTotal,
+            'total'           => number_format($total, 2, '.', ''),
         ];
     }
 }

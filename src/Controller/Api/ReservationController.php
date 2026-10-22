@@ -426,7 +426,7 @@ class ReservationController extends AbstractController
         return $this->json([
             'prixParJour'     => (float) $pricing['prixParJour'],
             'nbJours'         => $days,
-            'accessoireTotal' => array_sum(array_map(fn($a) => (float) $a->getPrix() * $days, $accessoires)),
+            'accessoireTotal' => $pricing['accessoireTotal'],
             'total'           => (float) $pricing['total'],
             'tarifActif'      => $tarif ? [
                 'libelle'        => $tarif->getLibelle(),

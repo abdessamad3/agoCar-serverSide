@@ -19,12 +19,13 @@ class AccessoireController extends AbstractController
     private function serialize(Accessoire $a): array
     {
         return [
-            'id'          => $a->getId(),
-            'nom'         => $a->getNom(),
-            'prix'        => $a->getPrix(),
-            'prixJour'    => $a->getPrix(),
-            'description' => $a->getDescription(),
-            'creeAu'      => $a->getCreeAu()?->format('Y-m-d'),
+            'id'               => $a->getId(),
+            'nom'              => $a->getNom(),
+            'prix'             => $a->getPrix(),
+            'prixJour'         => $a->getPrix(),
+            'typeTarification' => $a->getTypeTarification(),
+            'description'      => $a->getDescription(),
+            'creeAu'           => $a->getCreeAu()?->format('Y-m-d'),
         ];
     }
 
@@ -53,6 +54,7 @@ class AccessoireController extends AbstractController
         $accessoire = new Accessoire();
         $accessoire->setNom($data['nom']);
         $accessoire->setPrix($data['prixJour'] ?? $data['prix'] ?? '0');
+        if (isset($data['typeTarification'])) $accessoire->setTypeTarification($data['typeTarification']);
         if (isset($data['description'])) $accessoire->setDescription($data['description']);
         $accessoire->setCreeAu(new \DateTimeImmutable());
 
@@ -69,6 +71,7 @@ class AccessoireController extends AbstractController
 
         if (isset($data['nom']))                          $accessoire->setNom($data['nom']);
         if (isset($data['prixJour']) || isset($data['prix'])) $accessoire->setPrix($data['prixJour'] ?? $data['prix']);
+        if (isset($data['typeTarification']))             $accessoire->setTypeTarification($data['typeTarification']);
         if (isset($data['description']))                  $accessoire->setDescription($data['description']);
 
         $em->flush();

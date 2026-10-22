@@ -628,9 +628,10 @@ class LocationController extends AbstractController
             'creeAu'            => $r->getCreeAu()?->format('Y-m-d H:i:s'),
             'editAu'            => $r->getEditAu()?->format('Y-m-d H:i:s'),
             'accessoires'       => array_map(fn($a) => [
-                'id'   => $a->getId(),
-                'nom'  => $a->getNom(),
-                'prix' => $a->getPrix() !== null ? (float) $a->getPrix() : null,
+                'id'               => $a->getId(),
+                'nom'              => $a->getNom(),
+                'prix'             => $a->getPrix() !== null ? (float) $a->getPrix() : null,
+                'typeTarification' => $a->getTypeTarification(),
             ], $r->getAccessoires()->toArray()),
             'voiture' => $voiture ? [
                 'id'                => $voiture->getId(),

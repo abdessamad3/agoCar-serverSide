@@ -30,6 +30,7 @@ use App\Doctrine\VoitureStatusWriteGuard;
 use App\Service\ActivityLogService;
 use App\Service\ComplianceService;
 use App\Service\OilChangeService;
+use App\Service\ReservationPricingService;
 use App\Service\VoitureStatusService;
 use App\Trait\BureauAwareTrait;
 
@@ -47,7 +48,35 @@ class VoitureController extends AbstractController
         private ActivityLogService       $activityLog,
         private FleetLifecycleManager    $flm,
         private VoitureStatusWriteGuard  $guard,
+        private ReservationPricingService $pricing,
     ) {}
+
+    /** Same resolution rule the public site uses: the customer's chosen start date if
+     *  given and parseable, otherwise "today" -- so the fleet list and the booking
+     *  forms' vehicle picker show the same adjusted price a customer would actually pay. */
+    private function resolveTarifDate(?string $dateDebutStr): \DateTimeImmutable
+    {
+        if ($dateDebutStr) {
+            try {
+                return new \DateTimeImmutable($dateDebutStr);
+            } catch (\Exception) {}
+        }
+        return new \DateTimeImmutable('today');
+    }
+
+    private function tarifFields(Voiture $v, \DateTimeImmutable $resolveDate): array
+    {
+        $basePrice = (float) ($v->getPrixJour() ?? 0);
+        $tarif     = $this->pricing->resolveActiveTarif($v, $resolveDate);
+        return [
+            'prixJourAjuste' => $tarif ? number_format($tarif->applyTo($basePrice), 2, '.', '') : $v->getPrixJour(),
+            'tarifActif'     => $tarif ? [
+                'libelle'        => $tarif->getLibelle(),
+                'typeAjustement' => $tarif->getTypeAjustement(),
+                'valeur'         => (float) $tarif->getValeur(),
+            ] : null,
+        ];
+    }
 
     private function snapshotVoiture(Voiture $v): array
     {
@@ -106,7 +135,7 @@ class VoitureController extends AbstractController
                 'typeCarburant' => $typeCarburant,
                 'sort'          => $sort,
                 'direction'     => $direction,
-                'bureauId'      => $bureauId ?: null,
+                'bureauId'      => $bureauId,
             ];
 
             // 3. Get voitures and total count
@@ -134,8 +163,10 @@ class VoitureController extends AbstractController
             $oilMap        = $this->oilChangeService->getOilStatusBulk($voitures);
 
             // 5. Format response
+            $tarifResolveDate = $this->resolveTarifDate($dateDebutStr);
             $data = array_map(fn($v) => [
                 'id'                       => $v->getId(),
+                ...$this->tarifFields($v, $tarifResolveDate),
                 'marque'                   => $v->getMarque(),
                 'modele'                   => $v->getModele(),
                 'version'                  => $v->getVersion(),
@@ -193,16 +224,22 @@ class VoitureController extends AbstractController
         }
     }
 
-    #[Route('/{id}', name: 'show', methods: ['GET'])]
-    public function show(Voiture $voiture): JsonResponse
+    private function assertVehicleReadAccess(Voiture $voiture): void
     {
         $bureauId = $this->getEffectiveBureauId();
         if ($bureauId !== null && $voiture->getBureau()?->getId() !== $bureauId) {
             throw $this->createNotFoundException('Voiture introuvable');
         }
+    }
+
+    #[Route('/{id}', name: 'show', methods: ['GET'])]
+    public function show(Voiture $voiture): JsonResponse
+    {
+        $this->assertVehicleReadAccess($voiture);
         try {
             return $this->json([
                 'id'                       => $voiture->getId(),
+                ...$this->tarifFields($voiture, new \DateTimeImmutable('today')),
                 'marque'                   => $voiture->getMarque(),
                 'modele'                   => $voiture->getModele(),
                 'version'                  => $voiture->getVersion(),
@@ -509,6 +546,7 @@ class VoitureController extends AbstractController
     #[Route('/{id}/financial-summary', name: 'financial_summary', methods: ['GET'])]
     public function financialSummary(Voiture $voiture, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertVehicleReadAccess($voiture);
         try {
             $reservations = $em->createQueryBuilder()
                 ->select('r')->from(Reservation::class, 'r')
@@ -574,6 +612,7 @@ class VoitureController extends AbstractController
     #[Route('/{id}/transactions', name: 'transactions', methods: ['GET'])]
     public function transactions(Voiture $voiture, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->assertVehicleReadAccess($voiture);
         try {
             $typeF   = $request->query->get('type', '');
             $fromF   = $request->query->get('from', '');

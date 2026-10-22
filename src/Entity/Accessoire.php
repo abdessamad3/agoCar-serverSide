@@ -21,6 +21,11 @@ class Accessoire
     #[ORM\Column(type: 'decimal', precision: 10, scale: 2)]
     private ?string $prix = null;
 
+    /** 'par_jour' = prix charged once per rental day (the original/only behavior);
+     *  'unique' = prix charged once regardless of rental length (e.g. a cleaning fee). */
+    #[ORM\Column(length: 20, options: ['default' => 'par_jour'])]
+    private string $typeTarification = 'par_jour';
+
     #[ORM\Column(type: 'text', nullable: true)]
     private ?string $description = null;
 
@@ -66,6 +71,17 @@ class Accessoire
     public function setPrix(string $prix): static
     {
         $this->prix = $prix;
+        return $this;
+    }
+
+    public function getTypeTarification(): string
+    {
+        return $this->typeTarification;
+    }
+
+    public function setTypeTarification(string $typeTarification): static
+    {
+        $this->typeTarification = $typeTarification === 'unique' ? 'unique' : 'par_jour';
         return $this;
     }
 
