@@ -672,6 +672,7 @@ class LocationController extends AbstractController
             'deuxiemeChauffeur' => $dc ? [
                 'id'                 => $dc->getId(),
                 'nom'                => $dc->getNom(),
+                'prix'               => $dc->getPrix() !== null ? (float) $dc->getPrix() : null,
                 'nationalite'        => $dc->getNationalite(),
                 'cin'                => $dc->getCin(),
                 'permisConduite'     => $dc->getPermisConduite(),

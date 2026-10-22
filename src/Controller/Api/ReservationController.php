@@ -201,6 +201,7 @@ class ReservationController extends AbstractController
             'deuxiemeChauffeur' => $dc ? [
                 'id'                 => $dc->getId(),
                 'nom'                => $dc->getNom(),
+                'prix'               => $dc->getPrix() !== null ? (float) $dc->getPrix() : null,
                 'nationalite'        => $dc->getNationalite(),
                 'cin'                => $dc->getCin(),
                 'permisConduite'     => $dc->getPermisConduite(),
@@ -311,6 +312,7 @@ class ReservationController extends AbstractController
         $pricing = $this->pricing->computeTotal(
             $voiture, $dateDebut, $dateFin,
             $reservation->getAccessoires(), $reservation->getRemiseMontant(),
+            $reservation->getDeuxiemeChauffeur()?->getPrix(),
         );
         $reservation->setPrixParJour($pricing['prixParJour']);
         $reservation->setTotal($pricing['total']);
@@ -419,7 +421,10 @@ class ReservationController extends AbstractController
         $remiseMontant = isset($data['remiseMontant']) && $data['remiseMontant'] !== '' && $data['remiseMontant'] !== null
             ? (string) (float) $data['remiseMontant'] : null;
 
-        $pricing = $this->pricing->computeTotal($voiture, $dateDebut, $dateFin, $accessoires, $remiseMontant);
+        $dcPrix = isset($data['deuxiemeChauffeur']['prix']) && $data['deuxiemeChauffeur']['prix'] !== ''
+            ? (string) (float) $data['deuxiemeChauffeur']['prix'] : null;
+
+        $pricing = $this->pricing->computeTotal($voiture, $dateDebut, $dateFin, $accessoires, $remiseMontant, $dcPrix);
         $days    = $this->pricing->computeDays($dateDebut, $dateFin);
         $tarif   = $this->pricing->resolveActiveTarif($voiture, $dateDebut);
 
@@ -556,6 +561,18 @@ class ReservationController extends AbstractController
         // prixParJour is never read from the client either -- it's recomputed below,
         // same as total.
 
+        // Applied before the pricing recompute below so a same-request change to the
+        // second driver's price is reflected in the total immediately, not one request late.
+        if (array_key_exists('deuxiemeChauffeur', $data)) {
+            if ($data['deuxiemeChauffeur'] === null) {
+                $reservation->setDeuxiemeChauffeur(null);
+            } elseif (is_array($data['deuxiemeChauffeur'])) {
+                $dc = $reservation->getDeuxiemeChauffeur() ?? new DeuxiemeChauffeur();
+                $this->applyDeuxiemeChauffeur($dc, $data['deuxiemeChauffeur']);
+                $reservation->setDeuxiemeChauffeur($dc);
+            }
+        }
+
         // Once a reservation is closed, LocationController::cloture() has already folded
         // return-time charges into total -- an unconditional recompute here would silently
         // erase them. So accessoire/remise edits and the pricing recompute all only apply
@@ -590,19 +607,10 @@ class ReservationController extends AbstractController
                 $pricing = $this->pricing->computeTotal(
                     $voitureForPricing, $debutForPricing, $finForPricing,
                     $reservation->getAccessoires(), $reservation->getRemiseMontant(),
+                    $reservation->getDeuxiemeChauffeur()?->getPrix(),
                 );
                 $reservation->setPrixParJour($pricing['prixParJour']);
                 $reservation->setTotal($pricing['total']);
-            }
-        }
-
-        if (array_key_exists('deuxiemeChauffeur', $data)) {
-            if ($data['deuxiemeChauffeur'] === null) {
-                $reservation->setDeuxiemeChauffeur(null);
-            } elseif (is_array($data['deuxiemeChauffeur'])) {
-                $dc = $reservation->getDeuxiemeChauffeur() ?? new DeuxiemeChauffeur();
-                $this->applyDeuxiemeChauffeur($dc, $data['deuxiemeChauffeur']);
-                $reservation->setDeuxiemeChauffeur($dc);
             }
         }
 
@@ -667,6 +675,7 @@ class ReservationController extends AbstractController
     private function applyDeuxiemeChauffeur(DeuxiemeChauffeur $dc, array $d): void
     {
         if (isset($d['nom']))               $dc->setNom($d['nom']);
+        if (array_key_exists('prix', $d))   $dc->setPrix($d['prix'] !== null && $d['prix'] !== '' ? number_format((float) $d['prix'], 2, '.', '') : null);
         if (isset($d['nationalite']))       $dc->setNationalite($d['nationalite'] ?? null);
         if (isset($d['cin']))               $dc->setCin($d['cin'] ?? null);
         if (isset($d['permisConduite']))    $dc->setPermisConduite($d['permisConduite'] ?? null);

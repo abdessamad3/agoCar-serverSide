@@ -16,6 +16,12 @@ class DeuxiemeChauffeur
     #[ORM\Column(length: 100)]
     private string $nom = '';
 
+    /** Manual, staff-entered surcharge for having a second driver on this reservation
+     *  (e.g. an insurance add-on fee) -- a flat amount, not per day. Folded into the
+     *  reservation total by ReservationPricingService, same as accessories/remise. */
+    #[ORM\Column(type: 'decimal', precision: 10, scale: 2, nullable: true)]
+    private ?string $prix = null;
+
     #[ORM\Column(length: 50, nullable: true)]
     private ?string $nationalite = null;
 
@@ -62,6 +68,9 @@ class DeuxiemeChauffeur
 
     public function getNom(): string { return $this->nom; }
     public function setNom(string $v): static { $this->nom = $v; return $this; }
+
+    public function getPrix(): ?string { return $this->prix; }
+    public function setPrix(?string $v): static { $this->prix = $v; return $this; }
 
     public function getNationalite(): ?string { return $this->nationalite; }
     public function setNationalite(?string $v): static { $this->nationalite = $v; return $this; }

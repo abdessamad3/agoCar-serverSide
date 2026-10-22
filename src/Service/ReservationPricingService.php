@@ -53,6 +53,7 @@ class ReservationPricingService
         \DateTimeImmutable $fin,
         iterable $accessoires,
         ?string $remiseMontant,
+        ?string $deuxiemeChauffeurPrix = null,
     ): array {
         $days         = $this->computeDays($debut, $fin);
         $prixParJour  = $this->resolveDailyRate($voiture, $debut);
@@ -63,7 +64,8 @@ class ReservationPricingService
                 : ((float) $accessoire->getPrix()) * $days;
         }
 
-        $total = ((float) $prixParJour * $days) + $accessoryTotal - (float) ($remiseMontant ?? 0);
+        $total = ((float) $prixParJour * $days) + $accessoryTotal
+            + (float) ($deuxiemeChauffeurPrix ?? 0) - (float) ($remiseMontant ?? 0);
         $total = max(0.0, $total);
 
         return [
