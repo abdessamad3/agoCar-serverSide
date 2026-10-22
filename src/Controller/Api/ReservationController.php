@@ -674,26 +674,6 @@ class ReservationController extends AbstractController
 
     private function applyDeuxiemeChauffeur(DeuxiemeChauffeur $dc, array $d): void
     {
-        if (isset($d['nom']))               $dc->setNom($d['nom']);
-        if (array_key_exists('prix', $d))   $dc->setPrix($d['prix'] !== null && $d['prix'] !== '' ? number_format((float) $d['prix'], 2, '.', '') : null);
-        if (isset($d['nationalite']))       $dc->setNationalite($d['nationalite'] ?? null);
-        if (isset($d['cin']))               $dc->setCin($d['cin'] ?? null);
-        if (isset($d['permisConduite']))    $dc->setPermisConduite($d['permisConduite'] ?? null);
-        if (isset($d['permisDelivreA']))    $dc->setPermisDelivreA($d['permisDelivreA'] ?? null);
-        if (array_key_exists('permisDelivreLe', $d)) {
-            $dc->setPermisDelivreLe($d['permisDelivreLe'] ? new \DateTimeImmutable($d['permisDelivreLe']) : null);
-        }
-        if (isset($d['passeport']))         $dc->setPasseport($d['passeport'] ?? null);
-        if (isset($d['passeportDelivreA'])) $dc->setPasseportDelivreA($d['passeportDelivreA'] ?? null);
-        if (array_key_exists('passeportDelivreLe', $d)) {
-            $dc->setPasseportDelivreLe($d['passeportDelivreLe'] ? new \DateTimeImmutable($d['passeportDelivreLe']) : null);
-        }
-        if (array_key_exists('dateNaissance', $d)) {
-            $dc->setDateNaissance($d['dateNaissance'] ? new \DateTimeImmutable($d['dateNaissance']) : null);
-        }
-        if (isset($d['adresseMaroc']))      $dc->setAdresseMaroc($d['adresseMaroc'] ?? null);
-        if (isset($d['telephone']))         $dc->setTelephone($d['telephone'] ?? null);
-        if (isset($d['adresseEtranger']))   $dc->setAdresseEtranger($d['adresseEtranger'] ?? null);
-        if (isset($d['telephoneEtranger'])) $dc->setTelephoneEtranger($d['telephoneEtranger'] ?? null);
+        $dc->applyFromArray($d);
     }
 }

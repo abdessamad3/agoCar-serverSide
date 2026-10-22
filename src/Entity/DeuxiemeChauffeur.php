@@ -113,4 +113,32 @@ class DeuxiemeChauffeur
 
     public function getReservation(): ?Reservation { return $this->reservation; }
     public function setReservation(?Reservation $v): static { $this->reservation = $v; return $this; }
+
+    /** Shared partial-update logic -- used by ReservationController (nested under a
+     *  reservation create/update) and DeuxiemeChauffeurController (the dossier's
+     *  standalone edit-driver modal), so the two save paths can never drift apart. */
+    public function applyFromArray(array $d): void
+    {
+        if (isset($d['nom']))               $this->setNom($d['nom']);
+        if (array_key_exists('prix', $d))   $this->setPrix($d['prix'] !== null && $d['prix'] !== '' ? number_format((float) $d['prix'], 2, '.', '') : null);
+        if (isset($d['nationalite']))       $this->setNationalite($d['nationalite'] ?? null);
+        if (isset($d['cin']))               $this->setCin($d['cin'] ?? null);
+        if (isset($d['permisConduite']))    $this->setPermisConduite($d['permisConduite'] ?? null);
+        if (isset($d['permisDelivreA']))    $this->setPermisDelivreA($d['permisDelivreA'] ?? null);
+        if (array_key_exists('permisDelivreLe', $d)) {
+            $this->setPermisDelivreLe($d['permisDelivreLe'] ? new \DateTimeImmutable($d['permisDelivreLe']) : null);
+        }
+        if (isset($d['passeport']))         $this->setPasseport($d['passeport'] ?? null);
+        if (isset($d['passeportDelivreA'])) $this->setPasseportDelivreA($d['passeportDelivreA'] ?? null);
+        if (array_key_exists('passeportDelivreLe', $d)) {
+            $this->setPasseportDelivreLe($d['passeportDelivreLe'] ? new \DateTimeImmutable($d['passeportDelivreLe']) : null);
+        }
+        if (array_key_exists('dateNaissance', $d)) {
+            $this->setDateNaissance($d['dateNaissance'] ? new \DateTimeImmutable($d['dateNaissance']) : null);
+        }
+        if (isset($d['adresseMaroc']))      $this->setAdresseMaroc($d['adresseMaroc'] ?? null);
+        if (isset($d['telephone']))         $this->setTelephone($d['telephone'] ?? null);
+        if (isset($d['adresseEtranger']))   $this->setAdresseEtranger($d['adresseEtranger'] ?? null);
+        if (isset($d['telephoneEtranger'])) $this->setTelephoneEtranger($d['telephoneEtranger'] ?? null);
+    }
 }
